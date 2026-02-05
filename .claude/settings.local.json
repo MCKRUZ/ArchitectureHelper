@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(gh repo view:*)",
+      "WebFetch(domain:github.com)",
+      "Bash(pwsh:*)",
+      "Bash(cmd /c \"set NO_COLOR=1 && set TERM=dumb && C:\\\\Users\\\\kruz7\\\\.local\\\\bin\\\\specify.exe --help\")",
+      "Bash(cmd /c \"set NO_COLOR=1 && set FORCE_COLOR=0 && C:\\\\Users\\\\kruz7\\\\.local\\\\bin\\\\specify.exe --help 2>&1\")"
+    ]
+  }
+}
