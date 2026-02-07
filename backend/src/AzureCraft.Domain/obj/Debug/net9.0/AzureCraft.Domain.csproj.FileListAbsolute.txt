@@ -1,0 +1,12 @@
+C:\Users\kruz7\OneDrive\Documents\Code Repos\MCKRUZ\ArchitectureHelper\backend\src\AzureCraft.Domain\obj\Debug\net9.0\AzureCraft.Domain.csproj.AssemblyReference.cache
+C:\Users\kruz7\OneDrive\Documents\Code Repos\MCKRUZ\ArchitectureHelper\backend\src\AzureCraft.Domain\obj\Debug\net9.0\AzureCraft.Domain.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\kruz7\OneDrive\Documents\Code Repos\MCKRUZ\ArchitectureHelper\backend\src\AzureCraft.Domain\obj\Debug\net9.0\AzureCraft.Domain.AssemblyInfoInputs.cache
+C:\Users\kruz7\OneDrive\Documents\Code Repos\MCKRUZ\ArchitectureHelper\backend\src\AzureCraft.Domain\obj\Debug\net9.0\AzureCraft.Domain.AssemblyInfo.cs
+C:\Users\kruz7\OneDrive\Documents\Code Repos\MCKRUZ\ArchitectureHelper\backend\src\AzureCraft.Domain\obj\Debug\net9.0\AzureCraft.Domain.csproj.CoreCompileInputs.cache
+C:\Users\kruz7\OneDrive\Documents\Code Repos\MCKRUZ\ArchitectureHelper\backend\src\AzureCraft.Domain\bin\Debug\net9.0\AzureCraft.Domain.deps.json
+C:\Users\kruz7\OneDrive\Documents\Code Repos\MCKRUZ\ArchitectureHelper\backend\src\AzureCraft.Domain\bin\Debug\net9.0\AzureCraft.Domain.dll
+C:\Users\kruz7\OneDrive\Documents\Code Repos\MCKRUZ\ArchitectureHelper\backend\src\AzureCraft.Domain\bin\Debug\net9.0\AzureCraft.Domain.pdb
+C:\Users\kruz7\OneDrive\Documents\Code Repos\MCKRUZ\ArchitectureHelper\backend\src\AzureCraft.Domain\obj\Debug\net9.0\AzureCraft.Domain.dll
+C:\Users\kruz7\OneDrive\Documents\Code Repos\MCKRUZ\ArchitectureHelper\backend\src\AzureCraft.Domain\obj\Debug\net9.0\refint\AzureCraft.Domain.dll
+C:\Users\kruz7\OneDrive\Documents\Code Repos\MCKRUZ\ArchitectureHelper\backend\src\AzureCraft.Domain\obj\Debug\net9.0\AzureCraft.Domain.pdb
+C:\Users\kruz7\OneDrive\Documents\Code Repos\MCKRUZ\ArchitectureHelper\backend\src\AzureCraft.Domain\obj\Debug\net9.0\ref\AzureCraft.Domain.dll

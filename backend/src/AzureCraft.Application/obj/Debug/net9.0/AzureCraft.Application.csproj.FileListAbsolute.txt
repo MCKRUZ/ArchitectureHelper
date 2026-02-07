@@ -1,0 +1,15 @@
+C:\Users\kruz7\OneDrive\Documents\Code Repos\MCKRUZ\ArchitectureHelper\backend\src\AzureCraft.Application\bin\Debug\net9.0\AzureCraft.Application.deps.json
+C:\Users\kruz7\OneDrive\Documents\Code Repos\MCKRUZ\ArchitectureHelper\backend\src\AzureCraft.Application\bin\Debug\net9.0\AzureCraft.Application.dll
+C:\Users\kruz7\OneDrive\Documents\Code Repos\MCKRUZ\ArchitectureHelper\backend\src\AzureCraft.Application\bin\Debug\net9.0\AzureCraft.Application.pdb
+C:\Users\kruz7\OneDrive\Documents\Code Repos\MCKRUZ\ArchitectureHelper\backend\src\AzureCraft.Application\bin\Debug\net9.0\AzureCraft.Domain.dll
+C:\Users\kruz7\OneDrive\Documents\Code Repos\MCKRUZ\ArchitectureHelper\backend\src\AzureCraft.Application\bin\Debug\net9.0\AzureCraft.Domain.pdb
+C:\Users\kruz7\OneDrive\Documents\Code Repos\MCKRUZ\ArchitectureHelper\backend\src\AzureCraft.Application\obj\Debug\net9.0\AzureCraft.Application.csproj.AssemblyReference.cache
+C:\Users\kruz7\OneDrive\Documents\Code Repos\MCKRUZ\ArchitectureHelper\backend\src\AzureCraft.Application\obj\Debug\net9.0\AzureCraft.Application.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\kruz7\OneDrive\Documents\Code Repos\MCKRUZ\ArchitectureHelper\backend\src\AzureCraft.Application\obj\Debug\net9.0\AzureCraft.Application.AssemblyInfoInputs.cache
+C:\Users\kruz7\OneDrive\Documents\Code Repos\MCKRUZ\ArchitectureHelper\backend\src\AzureCraft.Application\obj\Debug\net9.0\AzureCraft.Application.AssemblyInfo.cs
+C:\Users\kruz7\OneDrive\Documents\Code Repos\MCKRUZ\ArchitectureHelper\backend\src\AzureCraft.Application\obj\Debug\net9.0\AzureCraft.Application.csproj.CoreCompileInputs.cache
+C:\Users\kruz7\OneDrive\Documents\Code Repos\MCKRUZ\ArchitectureHelper\backend\src\AzureCraft.Application\obj\Debug\net9.0\AzureCra.5BBE96C9.Up2Date
+C:\Users\kruz7\OneDrive\Documents\Code Repos\MCKRUZ\ArchitectureHelper\backend\src\AzureCraft.Application\obj\Debug\net9.0\AzureCraft.Application.dll
+C:\Users\kruz7\OneDrive\Documents\Code Repos\MCKRUZ\ArchitectureHelper\backend\src\AzureCraft.Application\obj\Debug\net9.0\refint\AzureCraft.Application.dll
+C:\Users\kruz7\OneDrive\Documents\Code Repos\MCKRUZ\ArchitectureHelper\backend\src\AzureCraft.Application\obj\Debug\net9.0\AzureCraft.Application.pdb
+C:\Users\kruz7\OneDrive\Documents\Code Repos\MCKRUZ\ArchitectureHelper\backend\src\AzureCraft.Application\obj\Debug\net9.0\ref\AzureCraft.Application.dll

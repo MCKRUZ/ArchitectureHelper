@@ -1,0 +1,412 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
+    --primary: 207 90% 42%; /* Azure blue */
+    --primary-foreground: 210 40% 98%;
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+    --accent: 210 40% 96.1%;
+    --accent-foreground: 222.2 47.4% 11.2%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 207 90% 42%;
+    --radius: 0.5rem;
+  }
+
+  .dark {
+    --background: 222.2 84% 4.9%;
+    --foreground: 210 40% 98%;
+    --card: 222.2 84% 4.9%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222.2 84% 4.9%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 207 90% 54%;
+    --primary-foreground: 222.2 47.4% 11.2%;
+    --secondary: 217.2 32.6% 17.5%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
+    --accent: 217.2 32.6% 17.5%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 217.2 32.6% 17.5%;
+    --input: 217.2 32.6% 17.5%;
+    --ring: 207 90% 54%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+/* ========================================
+   React Flow - Edge layer on top of nodes
+   ======================================== */
+
+.react-flow__edges {
+  z-index: 5 !important;
+}
+
+/* ========================================
+   React Flow - Node Styles
+   ======================================== */
+
+.react-flow__node {
+  @apply transition-all duration-200;
+}
+
+/* Ensure proper z-index stacking for nodes */
+.react-flow__node:hover {
+  z-index: 10 !important;
+}
+
+.react-flow__node.selected {
+  z-index: 20 !important;
+}
+
+/* Isometric node — allow 3D faces to overflow node bounds */
+.react-flow__node-azureService {
+  overflow: visible !important;
+}
+
+/* Group container node — strip React Flow default node chrome,
+   make interior click-through so service nodes behind are reachable */
+.react-flow__node-group {
+  overflow: visible !important;
+  z-index: 0 !important;
+  background: transparent !important;
+  border: none !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  pointer-events: none !important;
+}
+
+/* Only the diamond outline and resize handles capture clicks */
+.react-flow__node-group .group-drag-handle {
+  pointer-events: stroke !important;
+  cursor: grab;
+}
+
+.react-flow__node-group .react-flow__resize-control {
+  pointer-events: auto !important;
+}
+
+.group-node-container {
+  transition: box-shadow 0.2s ease;
+}
+
+.react-flow__node:hover .group-node-container {
+  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.3);
+  border-radius: 8px;
+}
+
+.group-node-selected {
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.5);
+  border-radius: 8px;
+}
+
+/* Isometric node container */
+.iso-node-container {
+  filter: drop-shadow(1px 2px 3px rgba(0, 0, 0, 0.06));
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+              filter 0.2s ease;
+}
+
+.react-flow__node:hover .iso-node-container {
+  transform: translateY(-1px);
+  filter: drop-shadow(1px 3px 5px rgba(0, 0, 0, 0.1));
+}
+
+.react-flow__node.selected .iso-node-container {
+  animation: nodeFloat 2.5s ease-in-out infinite;
+}
+
+/* Floating animation for selected nodes */
+@keyframes nodeFloat {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-2px);
+  }
+}
+
+/* ========================================
+   React Flow - Handle Styles
+   ======================================== */
+
+.react-flow__handle {
+  @apply transition-all duration-150;
+}
+
+.react-flow__handle:hover {
+  transform: scale(1.3);
+  box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.2);
+}
+
+.react-flow__handle.connecting {
+  animation: handlePulse 1s ease-in-out infinite;
+}
+
+@keyframes handlePulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(59, 130, 246, 0);
+  }
+}
+
+/* ========================================
+   React Flow - Edge Styles
+   ======================================== */
+
+.react-flow__edge {
+  @apply transition-opacity duration-200;
+}
+
+.react-flow__edge:hover {
+  opacity: 1 !important;
+}
+
+.react-flow__edge.selected {
+  z-index: 10 !important;
+}
+
+/* Azure edge path styling */
+.azure-edge {
+  transition: stroke-width 0.2s ease, stroke 0.2s ease;
+}
+
+.react-flow__edge:hover .azure-edge {
+  stroke-width: 3;
+}
+
+/* Edge connection line while dragging */
+.react-flow__connection-line {
+  stroke: hsl(var(--primary));
+  stroke-width: 2;
+  stroke-dasharray: 5 5;
+  animation: connectionDash 0.5s linear infinite;
+}
+
+@keyframes connectionDash {
+  to {
+    stroke-dashoffset: -10;
+  }
+}
+
+/* ========================================
+   React Flow - MiniMap Styles
+   ======================================== */
+
+.azure-minimap {
+  @apply backdrop-blur-sm shadow-lg;
+}
+
+.azure-minimap .react-flow__minimap-mask {
+  fill: rgba(59, 130, 246, 0.1);
+}
+
+.dark .azure-minimap .react-flow__minimap-mask {
+  fill: rgba(59, 130, 246, 0.2);
+}
+
+/* ========================================
+   React Flow - Controls Styles
+   ======================================== */
+
+.react-flow__controls {
+  @apply bg-card/80 backdrop-blur-sm border rounded-lg shadow-lg overflow-hidden;
+}
+
+.react-flow__controls-button {
+  @apply border-b border-border bg-transparent hover:bg-accent transition-colors;
+}
+
+.react-flow__controls-button:last-child {
+  @apply border-b-0;
+}
+
+.react-flow__controls-button svg {
+  @apply fill-foreground;
+}
+
+/* ========================================
+   React Flow - Selection Box
+   ======================================== */
+
+.react-flow__selection {
+  @apply bg-primary/10 border border-primary rounded;
+}
+
+/* ========================================
+   React Flow - Background (Cloudcraft Style)
+   ======================================== */
+
+.react-flow__background {
+  @apply bg-background;
+}
+
+/* Cloudcraft-inspired canvas background — clean white like the real thing */
+.cloudcraft-canvas {
+  background: #f9fafb;
+}
+
+.cloudcraft-canvas .react-flow__background {
+  background: transparent !important;
+}
+
+.dark .cloudcraft-canvas {
+  background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+}
+
+.dark .cloudcraft-canvas .react-flow__background pattern line {
+  stroke: rgba(255, 255, 255, 0.05) !important;
+}
+
+/* Cloudcraft minimap */
+.cloudcraft-minimap {
+  @apply bg-white/90 backdrop-blur-sm border border-slate-200 rounded-lg shadow-lg;
+}
+
+.dark .cloudcraft-minimap {
+  @apply bg-slate-800/90 border-slate-700;
+}
+
+/* Cloudcraft controls */
+.cloudcraft-controls {
+  @apply bg-white/90 backdrop-blur-sm border border-slate-200 rounded-lg shadow-lg overflow-hidden;
+}
+
+.cloudcraft-controls .react-flow__controls-button {
+  @apply bg-transparent hover:bg-slate-100 border-b border-slate-200;
+}
+
+.cloudcraft-controls .react-flow__controls-button:last-child {
+  @apply border-b-0;
+}
+
+.cloudcraft-controls .react-flow__controls-button svg {
+  @apply fill-slate-600;
+}
+
+.dark .cloudcraft-controls {
+  @apply bg-slate-800/90 border-slate-700;
+}
+
+.dark .cloudcraft-controls .react-flow__controls-button {
+  @apply hover:bg-slate-700 border-slate-700;
+}
+
+.dark .cloudcraft-controls .react-flow__controls-button svg {
+  @apply fill-slate-300;
+}
+
+.dark .react-flow__background pattern circle {
+  fill: rgba(255, 255, 255, 0.05);
+}
+
+/* ========================================
+   Hide React Flow attribution in development
+   ======================================== */
+
+.react-flow__attribution {
+  @apply hidden;
+}
+
+/* ========================================
+   Scrollbar Styling
+   ======================================== */
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-muted/50;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-muted-foreground/30 rounded-full;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-muted-foreground/50;
+}
+
+/* ========================================
+   Utility Animations
+   ======================================== */
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.2s ease-out;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.animate-slide-in {
+  animation: slideIn 0.2s ease-out;
+}
+
+/* ========================================
+   Card Hover Effects
+   ======================================== */
+
+.card-3d {
+  @apply relative transition-transform duration-200;
+}
+
+.card-3d::before {
+  content: '';
+  @apply absolute inset-0 rounded-lg bg-black/10 translate-x-1 translate-y-1 -z-10 transition-transform duration-200;
+}
+
+.card-3d:hover {
+  @apply -translate-y-0.5;
+}
+
+.card-3d:hover::before {
+  @apply translate-x-1.5 translate-y-1.5;
+}

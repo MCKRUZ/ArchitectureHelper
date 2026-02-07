@@ -1,0 +1,17 @@
+C:\Users\kruz7\OneDrive\Documents\Code Repos\MCKRUZ\ArchitectureHelper\backend\src\AzureCraft.Infrastructure\bin\Debug\net9.0\AzureCraft.Infrastructure.deps.json
+C:\Users\kruz7\OneDrive\Documents\Code Repos\MCKRUZ\ArchitectureHelper\backend\src\AzureCraft.Infrastructure\bin\Debug\net9.0\AzureCraft.Infrastructure.dll
+C:\Users\kruz7\OneDrive\Documents\Code Repos\MCKRUZ\ArchitectureHelper\backend\src\AzureCraft.Infrastructure\bin\Debug\net9.0\AzureCraft.Infrastructure.pdb
+C:\Users\kruz7\OneDrive\Documents\Code Repos\MCKRUZ\ArchitectureHelper\backend\src\AzureCraft.Infrastructure\bin\Debug\net9.0\AzureCraft.Application.dll
+C:\Users\kruz7\OneDrive\Documents\Code Repos\MCKRUZ\ArchitectureHelper\backend\src\AzureCraft.Infrastructure\bin\Debug\net9.0\AzureCraft.Domain.dll
+C:\Users\kruz7\OneDrive\Documents\Code Repos\MCKRUZ\ArchitectureHelper\backend\src\AzureCraft.Infrastructure\bin\Debug\net9.0\AzureCraft.Application.pdb
+C:\Users\kruz7\OneDrive\Documents\Code Repos\MCKRUZ\ArchitectureHelper\backend\src\AzureCraft.Infrastructure\bin\Debug\net9.0\AzureCraft.Domain.pdb
+C:\Users\kruz7\OneDrive\Documents\Code Repos\MCKRUZ\ArchitectureHelper\backend\src\AzureCraft.Infrastructure\obj\Debug\net9.0\AzureCraft.Infrastructure.csproj.AssemblyReference.cache
+C:\Users\kruz7\OneDrive\Documents\Code Repos\MCKRUZ\ArchitectureHelper\backend\src\AzureCraft.Infrastructure\obj\Debug\net9.0\AzureCraft.Infrastructure.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\kruz7\OneDrive\Documents\Code Repos\MCKRUZ\ArchitectureHelper\backend\src\AzureCraft.Infrastructure\obj\Debug\net9.0\AzureCraft.Infrastructure.AssemblyInfoInputs.cache
+C:\Users\kruz7\OneDrive\Documents\Code Repos\MCKRUZ\ArchitectureHelper\backend\src\AzureCraft.Infrastructure\obj\Debug\net9.0\AzureCraft.Infrastructure.AssemblyInfo.cs
+C:\Users\kruz7\OneDrive\Documents\Code Repos\MCKRUZ\ArchitectureHelper\backend\src\AzureCraft.Infrastructure\obj\Debug\net9.0\AzureCraft.Infrastructure.csproj.CoreCompileInputs.cache
+C:\Users\kruz7\OneDrive\Documents\Code Repos\MCKRUZ\ArchitectureHelper\backend\src\AzureCraft.Infrastructure\obj\Debug\net9.0\AzureCra.396DFCE0.Up2Date
+C:\Users\kruz7\OneDrive\Documents\Code Repos\MCKRUZ\ArchitectureHelper\backend\src\AzureCraft.Infrastructure\obj\Debug\net9.0\AzureCraft.Infrastructure.dll
+C:\Users\kruz7\OneDrive\Documents\Code Repos\MCKRUZ\ArchitectureHelper\backend\src\AzureCraft.Infrastructure\obj\Debug\net9.0\refint\AzureCraft.Infrastructure.dll
+C:\Users\kruz7\OneDrive\Documents\Code Repos\MCKRUZ\ArchitectureHelper\backend\src\AzureCraft.Infrastructure\obj\Debug\net9.0\AzureCraft.Infrastructure.pdb
+C:\Users\kruz7\OneDrive\Documents\Code Repos\MCKRUZ\ArchitectureHelper\backend\src\AzureCraft.Infrastructure\obj\Debug\net9.0\ref\AzureCraft.Infrastructure.dll
