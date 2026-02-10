@@ -1,13 +1,15 @@
 'use client';
 
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import { cn } from '@/lib/utils';
 import { useDiagramState } from '@/lib/state/useDiagramState';
-import type { DiagramState } from '@/lib/state/types';
+import type { DiagramState, ArchReviewFinding } from '@/lib/state/types';
 import { createInitialState } from '@/lib/state/types';
+import { CostBreakdownPanel } from './CostBreakdownPanel';
 
 export function Toolbar() {
   const { state, setDiagramName, clearDiagram, setState } = useDiagramState();
+  const [showCostBreakdown, setShowCostBreakdown] = useState(false);
 
   // Safety check for SSR/prerendering
   if (!state) return null;
@@ -53,68 +55,77 @@ export function Toolbar() {
   }, [setState]);
 
   return (
-    <div className="h-14 flex items-center justify-between px-4 bg-card border-b">
-      {/* Left section - Diagram name */}
-      <div className="flex items-center gap-4">
-        <input
-          type="text"
-          value={state.diagramName}
-          onChange={(e) => setDiagramName(e.target.value)}
-          className="text-lg font-semibold bg-transparent border-none focus:outline-none focus:ring-2 focus:ring-primary rounded px-2 py-1"
-        />
-        <span className="text-sm text-muted-foreground">v{state.version}</span>
+    <>
+      <div className="h-14 flex items-center justify-between px-4 bg-card border-b">
+        {/* Left section - Diagram name */}
+        <div className="flex items-center gap-4">
+          <input
+            type="text"
+            value={state.diagramName}
+            onChange={(e) => setDiagramName(e.target.value)}
+            className="text-lg font-semibold bg-transparent border-none focus:outline-none focus:ring-2 focus:ring-primary rounded px-2 py-1"
+          />
+          <span className="text-sm text-muted-foreground">v{state.version}</span>
+        </div>
+
+        {/* Center section - View modes */}
+        <div className="flex items-center gap-1 bg-muted rounded-lg p-1">
+          <ViewModeButton
+            label="2D"
+            active={state.viewMode === '2d'}
+            onClick={() => handleViewModeChange('2d')}
+          />
+          <ViewModeButton
+            label="Isometric"
+            active={state.viewMode === 'isometric'}
+            onClick={() => handleViewModeChange('isometric')}
+          />
+          <ViewModeButton
+            label="Cost"
+            active={state.viewMode === 'cost-heatmap'}
+            onClick={() => handleViewModeChange('cost-heatmap')}
+          />
+          <ViewModeButton
+            label="Compliance"
+            active={state.viewMode === 'compliance'}
+            onClick={() => handleViewModeChange('compliance')}
+          />
+        </div>
+
+        {/* Right section - Actions */}
+        <div className="flex items-center gap-2">
+          {/* Cost summary — clickable to open breakdown */}
+          <CostSummaryBadge
+            totalCost={state.costSummary.monthly}
+            onClick={() => setShowCostBreakdown(true)}
+          />
+
+          {/* WAF badge — always visible */}
+          <ValidationBadge results={state.validationResults} />
+
+          {/* Action buttons */}
+          <ToolbarButton onClick={handleImport} title="Import diagram">
+            Import
+          </ToolbarButton>
+          <ToolbarButton onClick={handleExport} title="Export diagram">
+            Export
+          </ToolbarButton>
+          <ToolbarButton
+            onClick={clearDiagram}
+            variant="destructive"
+            title="Clear canvas"
+          >
+            Clear
+          </ToolbarButton>
+        </div>
       </div>
 
-      {/* Center section - View modes */}
-      <div className="flex items-center gap-1 bg-muted rounded-lg p-1">
-        <ViewModeButton
-          label="2D"
-          active={state.viewMode === '2d'}
-          onClick={() => handleViewModeChange('2d')}
-        />
-        <ViewModeButton
-          label="Isometric"
-          active={state.viewMode === 'isometric'}
-          onClick={() => handleViewModeChange('isometric')}
-        />
-        <ViewModeButton
-          label="Cost"
-          active={state.viewMode === 'cost-heatmap'}
-          onClick={() => handleViewModeChange('cost-heatmap')}
-        />
-        <ViewModeButton
-          label="Compliance"
-          active={state.viewMode === 'compliance'}
-          onClick={() => handleViewModeChange('compliance')}
-        />
-      </div>
-
-      {/* Right section - Actions */}
-      <div className="flex items-center gap-2">
-        {/* Cost summary */}
-        <CostSummaryBadge totalCost={state.costSummary.monthly} />
-
-        {/* Validation badge */}
-        {state.validationResults.length > 0 && (
-          <ValidationBadge count={state.validationResults.length} />
-        )}
-
-        {/* Action buttons */}
-        <ToolbarButton onClick={handleImport} title="Import diagram">
-          Import
-        </ToolbarButton>
-        <ToolbarButton onClick={handleExport} title="Export diagram">
-          Export
-        </ToolbarButton>
-        <ToolbarButton
-          onClick={clearDiagram}
-          variant="destructive"
-          title="Clear canvas"
-        >
-          Clear
-        </ToolbarButton>
-      </div>
-    </div>
+      {/* Cost breakdown slide-over */}
+      <CostBreakdownPanel
+        isOpen={showCostBreakdown}
+        onClose={() => setShowCostBreakdown(false)}
+      />
+    </>
   );
 }
 
@@ -172,51 +183,68 @@ function ToolbarButton({
   );
 }
 
-// Cost summary badge
-function CostSummaryBadge({ totalCost }: { totalCost: number }) {
+// Cost summary badge — now clickable
+function CostSummaryBadge({ totalCost, onClick }: { totalCost: number; onClick: () => void }) {
   const formatted = totalCost === 0 ? '$0' : `$${Math.round(totalCost).toLocaleString()}`;
 
   return (
-    <div className="flex items-center gap-1.5 px-3 py-1.5 bg-green-100 dark:bg-green-900 rounded-md">
+    <button
+      onClick={onClick}
+      className="flex items-center gap-1.5 px-3 py-1.5 bg-green-100 dark:bg-green-900 rounded-md hover:bg-green-200 dark:hover:bg-green-800 transition-colors cursor-pointer"
+      title="View cost breakdown"
+    >
       <span className="text-xs text-green-700 dark:text-green-300">Est. Monthly</span>
       <span className="text-sm font-semibold text-green-800 dark:text-green-200">{formatted}</span>
-    </div>
+    </button>
   );
 }
 
-// Validation results badge
-function ValidationBadge({ count }: { count: number }) {
-  const critical = count > 5;
+// WAF validation results badge
+function ValidationBadge({ results }: { results: ArchReviewFinding[] }) {
+  const criticalCount = results.filter(r => r.severity === 'critical').length;
+  const warningCount = results.filter(r => r.severity === 'warning').length;
+  const total = results.length;
+
+  const hasCritical = criticalCount > 0;
+  const hasWarnings = warningCount > 0;
+
+  // Green = pass, Yellow = warnings only, Red = critical issues
+  const variant = hasCritical ? 'critical' : hasWarnings ? 'warning' : 'pass';
+
+  const label = total === 0 ? 'WAF' : `WAF ${total}`;
 
   return (
     <div
       className={cn(
         'flex items-center gap-1.5 px-3 py-1.5 rounded-md',
-        critical
-          ? 'bg-red-100 dark:bg-red-900'
-          : 'bg-yellow-100 dark:bg-yellow-900'
+        variant === 'critical' && 'bg-red-100 dark:bg-red-900',
+        variant === 'warning' && 'bg-yellow-100 dark:bg-yellow-900',
+        variant === 'pass' && 'bg-green-100 dark:bg-green-900'
       )}
     >
       <span
         className={cn(
           'text-xs',
-          critical
-            ? 'text-red-700 dark:text-red-300'
-            : 'text-yellow-700 dark:text-yellow-300'
+          variant === 'critical' && 'text-red-700 dark:text-red-300',
+          variant === 'warning' && 'text-yellow-700 dark:text-yellow-300',
+          variant === 'pass' && 'text-green-700 dark:text-green-300'
         )}
       >
-        Issues
+        {label}
       </span>
-      <span
-        className={cn(
-          'text-sm font-semibold',
-          critical
-            ? 'text-red-800 dark:text-red-200'
-            : 'text-yellow-800 dark:text-yellow-200'
-        )}
-      >
-        {count}
-      </span>
+      {total === 0 ? (
+        <span className="text-sm font-semibold text-green-800 dark:text-green-200">Pass</span>
+      ) : (
+        <span
+          className={cn(
+            'text-sm font-semibold',
+            variant === 'critical' && 'text-red-800 dark:text-red-200',
+            variant === 'warning' && 'text-yellow-800 dark:text-yellow-200'
+          )}
+        >
+          {hasCritical ? `${criticalCount}C ${warningCount}W` : `${warningCount}W`}
+        </span>
+      )}
     </div>
   );
 }

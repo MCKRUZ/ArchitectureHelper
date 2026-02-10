@@ -4,26 +4,26 @@
       {
         "matcher": "Write(*.ts)",
         "hooks": [
-          { "type": "command", "command": "npx prettier --write $file 2>/dev/null || true" }
+          { "type": "command", "command": "npx prettier --write \"$CLAUDE_FILE_PATH\"", "timeout": 10000 }
         ]
       },
       {
         "matcher": "Write(*.tsx)",
         "hooks": [
-          { "type": "command", "command": "npx prettier --write $file 2>/dev/null || true" }
+          { "type": "command", "command": "npx prettier --write \"$CLAUDE_FILE_PATH\"", "timeout": 10000 }
         ]
       },
       {
         "matcher": "Write(*.cs)",
         "hooks": [
-          { "type": "command", "command": "dotnet format --include $file 2>/dev/null || true" }
+          { "type": "command", "command": "dotnet format --include \"$CLAUDE_FILE_PATH\"", "timeout": 10000 }
         ]
       }
     ],
     "Stop": [
       {
         "hooks": [
-          { "type": "command", "command": "cd apps/web && npx tsc --noEmit 2>/dev/null || true" }
+          { "type": "command", "command": "cd apps/web && npx tsc --noEmit", "timeout": 30000 }
         ]
       }
     ]

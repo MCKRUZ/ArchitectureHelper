@@ -59,12 +59,8 @@
 }
 
 /* ========================================
-   React Flow - Edge layer on top of nodes
+   React Flow - Edge layer behind nodes
    ======================================== */
-
-.react-flow__edges {
-  z-index: 5 !important;
-}
 
 /* ========================================
    React Flow - Node Styles
@@ -101,29 +97,72 @@
   pointer-events: none !important;
 }
 
-/* Only the diamond outline and resize handles capture clicks */
-.react-flow__node-group .group-drag-handle {
-  pointer-events: stroke !important;
+/* Label = drag handle (move). Grab cursor. */
+.react-flow__node-group .group-label {
+  pointer-events: auto !important;
   cursor: grab;
 }
 
+.react-flow__node-group .group-label:active {
+  cursor: grabbing;
+}
+
+/* All resize controls need pointer-events in the pointer-events:none parent */
 .react-flow__node-group .react-flow__resize-control {
   pointer-events: auto !important;
 }
 
-.group-node-container {
-  transition: box-shadow 0.2s ease;
+/* Custom resize handles at diamond vertices — visible on hover/select */
+.react-flow__node-group .group-resize-handle {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: white;
+  border: 2px solid #3B82F6;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  pointer-events: auto !important;
+  z-index: 10;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
 }
 
-.react-flow__node:hover .group-node-container {
-  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.3);
-  border-radius: 8px;
+.react-flow__node-group .group-resize-handle:hover {
+  transform: translate(-50%, -50%) scale(1.3);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.3), 0 1px 3px rgba(0, 0, 0, 0.3);
 }
 
-.group-node-selected {
-  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.5);
-  border-radius: 8px;
+/* North = diamond top vertex (50%, 0) */
+.react-flow__node-group .group-resize-handle--north {
+  left: 50%;
+  top: 0;
+  transform: translate(-50%, -50%);
+  cursor: n-resize;
 }
+
+/* East = diamond right vertex (100%, 50%) */
+.react-flow__node-group .group-resize-handle--east {
+  left: 100%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  cursor: e-resize;
+}
+
+/* South = diamond bottom vertex (50%, 100%) */
+.react-flow__node-group .group-resize-handle--south {
+  left: 50%;
+  top: 100%;
+  transform: translate(-50%, -50%);
+  cursor: s-resize;
+}
+
+/* West = diamond left vertex (0, 50%) */
+.react-flow__node-group .group-resize-handle--west {
+  left: 0;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  cursor: w-resize;
+}
+
 
 /* Isometric node container */
 .iso-node-container {
@@ -200,6 +239,27 @@
 
 .react-flow__edge:hover .azure-edge {
   stroke-width: 3;
+}
+
+/* Animated flowing dashes showing data direction */
+.azure-edge-flow {
+  stroke-dasharray: 6 4;
+  animation: flowDash 0.8s linear infinite;
+}
+
+.react-flow__edge:hover .azure-edge-flow {
+  stroke-dasharray: 8 4;
+  stroke-width: 2.5;
+}
+
+.react-flow__edge.selected .azure-edge-flow {
+  stroke-dasharray: 8 4;
+}
+
+@keyframes flowDash {
+  to {
+    stroke-dashoffset: -20;
+  }
 }
 
 /* Edge connection line while dragging */
@@ -409,4 +469,130 @@
 
 .card-3d:hover::before {
   @apply translate-x-1.5 translate-y-1.5;
+}
+
+/* ========================================
+   2D Flat Node Styles
+   ======================================== */
+
+.flat-node-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: white;
+  border: 1px solid #E2E8F0;
+  border-radius: 6px;
+  overflow: hidden;
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
+  cursor: grab;
+}
+
+.flat-node-card:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.flat-node-card--selected {
+  border-color: #3B82F6;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2), 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.flat-node-accent {
+  width: 4px;
+  height: 100%;
+  flex-shrink: 0;
+}
+
+.flat-node-icon {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+}
+
+.flat-node-label {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  padding-right: 8px;
+}
+
+.dark .flat-node-card {
+  background: #1E293B;
+  border-color: #334155;
+}
+
+.dark .flat-node-card--selected {
+  border-color: #3B82F6;
+}
+
+/* ========================================
+   2D Flat Group Node Styles
+   ======================================== */
+
+.flat-group-container {
+  border: 2px dashed;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.flat-group-container--active {
+  border-style: solid;
+}
+
+.flat-group-header {
+  display: flex;
+  flex-direction: column;
+  padding: 4px 0;
+  border-radius: 6px 6px 0 0;
+}
+
+/* React Flow overrides for flat group nodes */
+.react-flow__node-flatGroup {
+  overflow: visible !important;
+  background: transparent !important;
+  border: none !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+}
+
+/* ========================================
+   Node Hover Popover
+   ======================================== */
+
+.node-popover {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: 220px;
+  padding: 10px 12px;
+  background: #1E293B;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  z-index: 50;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.group\/node:hover .node-popover {
+  opacity: 1;
+  transition-delay: 400ms;
+}
+
+.node-popover-arrow {
+  position: absolute;
+  bottom: -5px;
+  left: 50%;
+  transform: translateX(-50%) rotate(45deg);
+  width: 10px;
+  height: 10px;
+  background: #1E293B;
+  border-right: 1px solid #334155;
+  border-bottom: 1px solid #334155;
 }

@@ -43,6 +43,11 @@ export type AzureServiceType =
   | 'azure-openai'
   | 'entra-id'
   | 'log-analytics'
+  | 'application-insights'
+  | 'ai-search'
+  | 'ddos-protection'
+  | 'event-grid'
+  | 'static-web-app'
   | 'resource-group';
 
 // Group container types
@@ -63,6 +68,8 @@ export type ConnectionType =
 export interface AzureNodeData extends Record<string, unknown> {
   serviceType: AzureServiceType;
   displayName: string;
+  /** AI-generated description of why this service exists and its role */
+  description?: string;
   resourceId?: string;
   sku?: string;
   region?: string;

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import {
   ReactFlow,
   Controls,
@@ -20,108 +20,60 @@ import '@xyflow/react/dist/style.css';
 
 import { GenericAzureNode } from './nodes/GenericAzureNode';
 import { GroupNode } from './nodes/GroupNode';
+import { FlatAzureNode } from './nodes/FlatAzureNode';
+import { FlatGroupNode } from './nodes/FlatGroupNode';
 import { AzureEdge } from './edges/AzureEdge';
 import { IsometricGrid } from './IsometricGrid';
+import { CartesianGrid } from './CartesianGrid';
 import { useDiagramState } from '@/lib/state/useDiagramState';
 import { useCopilotActions } from './useCopilotActions';
+import { snapToIsoGrid, snapGroupToIsoGrid } from '@/lib/layout/isoSnap';
+import { snapToCartesianGrid } from '@/lib/layout/cartesianSnap';
 import type { AzureNodeData, AzureEdgeData, AzureServiceType, AzureServiceCategory, GroupType } from '@/lib/state/types';
 import { generateId } from '@/lib/utils';
 
-// Define typed node and edge for React Flow
 type AzureFlowNode = Node<AzureNodeData>;
 type AzureFlowEdge = Edge<AzureEdgeData>;
 
-// Register custom node types
-const nodeTypes = {
+// Isometric node types
+const isoNodeTypes = {
   azureService: GenericAzureNode,
   group: GroupNode,
 };
 
-// Register custom edge types
+// 2D flat node types
+const flatNodeTypes = {
+  azureService: FlatAzureNode,
+  group: FlatGroupNode,
+};
+
+// Edge types (shared)
 const edgeTypes = {
   azure: AzureEdge,
 };
 
-// --- Isometric grid snapping ---
-// Grid vertices in the 2:1 isometric grid are at ((n-m)*G, (n+m)*G/2)
-// for integer n, m where G = GRID_SPACING = 40.
-// The 3D cube's bottom vertex is at (nodeX + 40, nodeY + 55).
-// We snap the BOTTOM to the grid so the cube sits ON the grid.
-const ISO_G = 40;
-const DIAMOND_HALF_W = 40;
-const CUBE_BOTTOM_Y = 55; // DH(40) + D(15) — bottom vertex offset from node top
-
-function snapToIsoGrid(nodeX: number, nodeY: number): { x: number; y: number } {
-  const botX = nodeX + DIAMOND_HALF_W;
-  const botY = nodeY + CUBE_BOTTOM_Y;
-  const halfG = ISO_G / 2;
-
-  const kFloor = Math.floor(botX / ISO_G);
-  const kCeil = kFloor + 1;
-  const jFloor = Math.floor(botY / halfG);
-  const jCeil = jFloor + 1;
-
-  let bestDist = Infinity;
-  let bestX = nodeX;
-  let bestY = nodeY;
-
-  for (const k of [kFloor, kCeil]) {
-    for (const j of [jFloor, jCeil]) {
-      if ((k + j) % 2 !== 0) continue; // only valid grid vertices
-      const gx = k * ISO_G;
-      const gy = j * halfG;
-      const d = (gx - botX) ** 2 + (gy - botY) ** 2;
-      if (d < bestDist) {
-        bestDist = d;
-        bestX = gx - DIAMOND_HALF_W;
-        bestY = gy - CUBE_BOTTOM_Y;
-      }
-    }
-  }
-
-  return { x: bestX, y: bestY };
-}
-
-// Snap a group node's TOP vertex to the nearest isometric grid vertex.
-// The diamond's top vertex is at (nodeX + W/2, nodeY).
-function snapGroupToIsoGrid(nodeX: number, nodeY: number, nodeW: number): { x: number; y: number } {
-  const topX = nodeX + nodeW / 2;
-  const topY = nodeY;
-  const halfG = ISO_G / 2;
-
-  const kFloor = Math.floor(topX / ISO_G);
-  const kCeil = kFloor + 1;
-  const jFloor = Math.floor(topY / halfG);
-  const jCeil = jFloor + 1;
-
-  let bestDist = Infinity;
-  let bestX = nodeX;
-  let bestY = nodeY;
-
-  for (const k of [kFloor, kCeil]) {
-    for (const j of [jFloor, jCeil]) {
-      if ((k + j) % 2 !== 0) continue;
-      const gx = k * ISO_G;
-      const gy = j * halfG;
-      const d = (gx - topX) ** 2 + (gy - topY) ** 2;
-      if (d < bestDist) {
-        bestDist = d;
-        bestX = gx - nodeW / 2;
-        bestY = gy;
-      }
-    }
-  }
-
-  return { x: bestX, y: bestY };
-}
-
-// Inner component that uses useReactFlow
 function AzureCanvasInner() {
-  const { state, selectNode, updateNodesPositions, updateNode, addEdge: addEdgeToState, addNode, removeNode, clearDiagram, addGroup, assignNodeToGroup, removeGroup } = useDiagramState();
+  const {
+    state,
+    selectNode,
+    updateNodesPositions,
+    updateNode,
+    addEdge: addEdgeToState,
+    addNode,
+    removeNode,
+    clearDiagram,
+    addGroup,
+    assignNodeToGroup,
+    removeGroup,
+    batchUpdate,
+    setValidationResults,
+    setCostSummary,
+  } = useDiagramState();
+
+  const isIso = state.viewMode === 'isometric';
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const { screenToFlowPosition } = useReactFlow();
 
-  // Register CopilotKit actions for AI-driven diagram manipulation
   useCopilotActions({
     state,
     addNode,
@@ -129,49 +81,73 @@ function AzureCanvasInner() {
     addEdge: addEdgeToState,
     clearDiagram,
     updateNodesPositions,
+    updateNode,
     addGroup,
     assignNodeToGroup,
     removeGroup,
+    batchUpdate,
+    setValidationResults,
+    setCostSummary,
   });
 
   const [nodes, setNodes, onNodesChange] = useNodesState<AzureFlowNode>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<AzureFlowEdge>([]);
 
-  // Sync state.nodes to React Flow nodes whenever state changes
-  // Parent (group) nodes must come before children in the array for React Flow
+  // Switch nodeTypes based on viewMode — intentionally remounts nodes
+  const nodeTypes = useMemo(() => (isIso ? isoNodeTypes : flatNodeTypes), [isIso]);
+
+  // Sync state.nodes to React Flow nodes
   useEffect(() => {
-    const groups: AzureFlowNode[] = [];
-    const children: AzureFlowNode[] = [];
+    const parentGroups: AzureFlowNode[] = [];
+    const childGroups: AzureFlowNode[] = [];
+    const serviceChildren: AzureFlowNode[] = [];
 
     state.nodes.forEach((n) => {
       if (n.type === 'group') {
         const w = (n.data.properties?.width as number) ?? 400;
         const h = (n.data.properties?.height as number) ?? 200;
-        groups.push({
-          id: n.id,
-          type: 'group',
-          position: n.position,
-          data: n.data as AzureNodeData,
-          style: { width: w, height: h },
-          dragHandle: '.group-drag-handle',
-        });
+
+        const groupNode: AzureFlowNode = isIso
+          ? {
+              id: n.id,
+              type: 'group',
+              position: n.position,
+              data: n.data as AzureNodeData,
+              style: { width: w, height: h },
+              dragHandle: '.group-label',
+              parentId: n.parentId,
+            }
+          : {
+              id: n.id,
+              type: 'group' as const,
+              position: n.position,
+              data: n.data as AzureNodeData,
+              style: { width: w, height: h },
+              parentId: n.parentId,
+            };
+
+        // Parent groups (no parentId) come first, nested groups come after
+        if (n.parentId) {
+          childGroups.push(groupNode);
+        } else {
+          parentGroups.push(groupNode);
+        }
       } else {
-        children.push({
+        serviceChildren.push({
           id: n.id,
           type: 'azureService' as const,
           position: n.position,
           data: n.data as AzureNodeData,
           parentId: n.parentId,
-          extent: n.parentId ? 'parent' as const : undefined,
         });
       }
     });
 
-    setNodes([...groups, ...children]);
-  }, [state.nodes, setNodes]);
+    // React Flow requires parents before children in the array
+    setNodes([...parentGroups, ...childGroups, ...serviceChildren]);
+  }, [state.nodes, setNodes, isIso]);
 
-  // Sync state.edges to React Flow edges whenever state changes
-  // Single centered handle per node — edge component computes actual endpoints
+  // Sync state.edges to React Flow edges
   useEffect(() => {
     const flowEdges: AzureFlowEdge[] = state.edges.map((e) => ({
       id: e.id,
@@ -185,7 +161,6 @@ function AzureCanvasInner() {
     setEdges(flowEdges);
   }, [state.edges, setEdges]);
 
-  // Handle node selection
   const handleNodeClick = useCallback(
     (_: React.MouseEvent, node: { id: string }) => {
       selectNode(node.id);
@@ -193,12 +168,10 @@ function AzureCanvasInner() {
     [selectNode]
   );
 
-  // Handle pane click (deselect)
   const handlePaneClick = useCallback(() => {
     selectNode(null);
   }, [selectNode]);
 
-  // Handle connection creation
   const onConnect = useCallback(
     (params: Connection) => {
       if (params.source && params.target) {
@@ -218,12 +191,25 @@ function AzureCanvasInner() {
     [addEdgeToState, setEdges]
   );
 
+  // View-mode-aware snap function
+  const snapPosition = useCallback(
+    (x: number, y: number, nodeType?: string, nodeW?: number) => {
+      if (isIso) {
+        if (nodeType === 'group' && nodeW) {
+          return snapGroupToIsoGrid(x, y, nodeW);
+        }
+        return snapToIsoGrid(x, y);
+      }
+      return snapToCartesianGrid(x, y);
+    },
+    [isIso]
+  );
+
   // Handle node changes (position updates + group resize snap)
   const handleNodesChange = useCallback(
     (changes: NodeChange<AzureFlowNode>[]) => {
       onNodesChange(changes);
 
-      // Sync position changes back to state
       const positionChanges = changes
         .filter((c): c is NodeChange<AzureFlowNode> & { type: 'position'; position: { x: number; y: number } } =>
           c.type === 'position' && 'position' in c && c.position !== undefined)
@@ -237,7 +223,6 @@ function AzureCanvasInner() {
       }
 
       // Snap group dimensions on resize end
-      // W must be a multiple of 80, H = W/2 to keep all diamond vertices on grid
       for (const change of changes) {
         if (
           change.type === 'dimensions' &&
@@ -249,24 +234,27 @@ function AzureCanvasInner() {
           const stateNode = state.nodes.find((n) => n.id === change.id);
           if (stateNode?.type !== 'group') continue;
 
-          const rawW = change.dimensions.width;
-          const snappedW = Math.max(160, Math.round(rawW / 80) * 80);
-          const snappedH = snappedW / 2;
+          let snappedW: number;
+          let snappedH: number;
 
-          // Snap React Flow node style + re-snap position
+          if (isIso) {
+            snappedW = Math.max(160, Math.round(change.dimensions.width / 80) * 80);
+            snappedH = snappedW / 2;
+          } else {
+            snappedW = Math.max(200, Math.round(change.dimensions.width / 40) * 40);
+            snappedH = Math.max(120, Math.round(change.dimensions.height / 40) * 40);
+          }
+
           setNodes((nds) =>
             nds.map((n) => {
               if (n.id !== change.id) return n;
-              const snappedPos = snapGroupToIsoGrid(n.position.x, n.position.y, snappedW);
               return {
                 ...n,
                 style: { ...n.style, width: snappedW, height: snappedH },
-                position: snappedPos,
               };
             })
           );
 
-          // Sync snapped dimensions + position back to diagram state
           updateNode(change.id, {
             data: {
               ...stateNode.data,
@@ -280,20 +268,14 @@ function AzureCanvasInner() {
         }
       }
     },
-    [onNodesChange, updateNodesPositions, state.nodes, setNodes, updateNode]
+    [onNodesChange, updateNodesPositions, state.nodes, setNodes, updateNode, isIso]
   );
 
-  // Snap node to isometric grid vertex on drag stop
-  const onNodeDragStop = useCallback(
+  // Live snap during drag
+  const onNodeDrag = useCallback(
     (_: React.MouseEvent, node: AzureFlowNode) => {
-      let snapped: { x: number; y: number };
-
-      if (node.type === 'group') {
-        const w = (node.measured?.width ?? (node.style?.width as number)) || 400;
-        snapped = snapGroupToIsoGrid(node.position.x, node.position.y, w);
-      } else {
-        snapped = snapToIsoGrid(node.position.x, node.position.y);
-      }
+      const w = (node.measured?.width ?? (node.style?.width as number)) || 400;
+      const snapped = snapPosition(node.position.x, node.position.y, node.type, w);
 
       if (snapped.x !== node.position.x || snapped.y !== node.position.y) {
         setNodes((nds) =>
@@ -304,16 +286,32 @@ function AzureCanvasInner() {
         updateNodesPositions([{ id: node.id, position: snapped }]);
       }
     },
-    [setNodes, updateNodesPositions]
+    [setNodes, updateNodesPositions, snapPosition]
   );
 
-  // Handle drag over to allow drop
+  // Final snap on drag stop
+  const onNodeDragStop = useCallback(
+    (_: React.MouseEvent, node: AzureFlowNode) => {
+      const w = (node.measured?.width ?? (node.style?.width as number)) || 400;
+      const snapped = snapPosition(node.position.x, node.position.y, node.type, w);
+
+      if (snapped.x !== node.position.x || snapped.y !== node.position.y) {
+        setNodes((nds) =>
+          nds.map((n) =>
+            n.id === node.id ? { ...n, position: snapped } : n
+          )
+        );
+        updateNodesPositions([{ id: node.id, position: snapped }]);
+      }
+    },
+    [setNodes, updateNodesPositions, snapPosition]
+  );
+
   const onDragOver = useCallback((event: React.DragEvent) => {
     event.preventDefault();
     event.dataTransfer.dropEffect = 'copy';
   }, []);
 
-  // Handle drop to create new node
   const onDrop = useCallback(
     (event: React.DragEvent) => {
       event.preventDefault();
@@ -333,17 +331,17 @@ function AzureCanvasInner() {
           });
 
           const defaultW = 400;
-          const snappedPos = snapGroupToIsoGrid(
-            rawPosition.x - defaultW / 2,
-            rawPosition.y - 100,
-            defaultW,
-          );
+          const snapped = isIso
+            ? snapGroupToIsoGrid(rawPosition.x - defaultW / 2, rawPosition.y - 100, defaultW)
+            : snapToCartesianGrid(rawPosition.x - defaultW / 2, rawPosition.y - 60);
 
           addGroup({
             id: generateId(),
-            position: snappedPos,
+            position: snapped,
             displayName: group.name,
             groupType: group.groupType,
+            width: isIso ? 400 : 400,
+            height: isIso ? 200 : 200,
           });
         } catch (e) {
           console.error('Failed to parse dropped group:', e);
@@ -362,14 +360,14 @@ function AzureCanvasInner() {
           description: string;
         };
 
-        // Get drop position in flow coordinates, snapped to isometric grid
         const rawPosition = screenToFlowPosition({
           x: event.clientX,
           y: event.clientY,
         });
-        const position = snapToIsoGrid(rawPosition.x, rawPosition.y);
+        const position = isIso
+          ? snapToIsoGrid(rawPosition.x, rawPosition.y)
+          : snapToCartesianGrid(rawPosition.x, rawPosition.y);
 
-        // Create new node
         const newNode = {
           id: generateId(),
           type: 'azureService',
@@ -383,14 +381,15 @@ function AzureCanvasInner() {
           },
         };
 
-        // Add to state (React Flow will sync via useEffect)
         addNode(newNode);
       } catch (e) {
         console.error('Failed to parse dropped service:', e);
       }
     },
-    [screenToFlowPosition, addNode, addGroup]
+    [screenToFlowPosition, addNode, addGroup, isIso]
   );
+
+  const GridComponent = isIso ? IsometricGrid : CartesianGrid;
 
   return (
     <div ref={reactFlowWrapper} className="w-full h-full">
@@ -404,13 +403,12 @@ function AzureCanvasInner() {
       onPaneClick={handlePaneClick}
       onDragOver={onDragOver}
       onDrop={onDrop}
+      onNodeDrag={onNodeDrag}
       onNodeDragStop={onNodeDragStop}
       nodeTypes={nodeTypes}
       edgeTypes={edgeTypes}
       fitView
       connectionMode={ConnectionMode.Loose}
-      snapToGrid
-      snapGrid={[40, 20]}
       defaultEdgeOptions={{
         type: 'azure',
         animated: false,
@@ -418,7 +416,7 @@ function AzureCanvasInner() {
       proOptions={{ hideAttribution: true }}
       className="cloudcraft-canvas"
     >
-      <IsometricGrid />
+      <GridComponent />
       <Controls className="cloudcraft-controls" />
       <MiniMap
         nodeStrokeWidth={2}
@@ -432,7 +430,6 @@ function AzureCanvasInner() {
   );
 }
 
-// Wrapper component that provides ReactFlowProvider
 export function AzureCanvas() {
   return (
     <ReactFlowProvider>

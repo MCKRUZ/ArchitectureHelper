@@ -4,7 +4,11 @@ import { useRef } from 'react';
 import { useCopilotAction, useCopilotReadable } from '@copilotkit/react-core';
 import { generateId } from '@/lib/utils';
 import { calculateTierBasedPosition, calculateAutoLayout } from '@/lib/layout/autoLayout';
-import type { AzureServiceType, AzureServiceCategory, DiagramState, AzureNode, AzureEdge, GroupType } from '@/lib/state/types';
+import { snapToIsoGrid, snapGroupToIsoGrid, snapGroupDimensions } from '@/lib/layout/isoSnap';
+import { snapToCartesianGrid } from '@/lib/layout/cartesianSnap';
+import type { AzureServiceType, AzureServiceCategory, DiagramState, AzureNode, AzureEdge, GroupType, ArchReviewFinding, CostSummary } from '@/lib/state/types';
+import { runWafReview } from '@/lib/waf/wafReview';
+import { getDefaultPricingConfig, calculateServiceCost, deriveSku } from '@/lib/pricing/calculateCost';
 
 // Map service types to categories
 const SERVICE_CATEGORIES: Record<AzureServiceType, AzureServiceCategory> = {
@@ -28,6 +32,11 @@ const SERVICE_CATEGORIES: Record<AzureServiceType, AzureServiceCategory> = {
   'azure-openai': 'ai-ml',
   'entra-id': 'identity',
   'log-analytics': 'management',
+  'application-insights': 'management',
+  'ai-search': 'ai-ml',
+  'ddos-protection': 'security',
+  'event-grid': 'messaging',
+  'static-web-app': 'web',
   'resource-group': 'management',
 };
 
@@ -35,10 +44,40 @@ const VALID_SERVICE_TYPES: AzureServiceType[] = [
   'app-service', 'function-app', 'virtual-machine', 'container-apps', 'aks',
   'azure-sql', 'cosmos-db', 'storage-account', 'redis-cache', 'virtual-network',
   'application-gateway', 'load-balancer', 'front-door', 'key-vault', 'api-management',
-  'service-bus', 'event-hub', 'azure-openai', 'entra-id', 'log-analytics'
+  'service-bus', 'event-hub', 'azure-openai', 'entra-id', 'log-analytics',
+  'application-insights', 'ai-search', 'ddos-protection', 'event-grid', 'static-web-app'
 ];
 
 const VALID_GROUP_TYPES: GroupType[] = ['resource-group', 'virtual-network', 'subnet'];
+
+/**
+ * Normalize a display name for fuzzy matching.
+ * Strips whitespace, hyphens, underscores and lowercases.
+ */
+function normalizeName(name: string): string {
+  return name.toLowerCase().replace(/[\s\-_]/g, '');
+}
+
+/**
+ * Look up a node ID by display name with fuzzy matching.
+ * Tries exact (lowercase) match first, then normalized match.
+ */
+function findNodeIdByName(
+  name: string,
+  nameToId: Map<string, string>,
+): string | undefined {
+  // Exact lowercase match
+  const exact = nameToId.get(name.toLowerCase());
+  if (exact) return exact;
+
+  // Normalized match (strip separators)
+  const normalized = normalizeName(name);
+  for (const [key, id] of nameToId.entries()) {
+    if (normalizeName(key) === normalized) return id;
+  }
+
+  return undefined;
+}
 
 interface UseCopilotActionsProps {
   state: DiagramState;
@@ -47,6 +86,7 @@ interface UseCopilotActionsProps {
   addEdge: (edge: AzureEdge) => void;
   clearDiagram: () => void;
   updateNodesPositions: (updates: Array<{ id: string; position: { x: number; y: number } }>) => void;
+  updateNode: (nodeId: string, updates: Partial<AzureNode>) => void;
   addGroup: (group: {
     id: string;
     position: { x: number; y: number };
@@ -58,6 +98,15 @@ interface UseCopilotActionsProps {
   }) => void;
   assignNodeToGroup: (nodeId: string, groupId: string) => void;
   removeGroup: (groupId: string) => void;
+  batchUpdate: (ops: {
+    addNodes?: AzureNode[];
+    addEdges?: AzureEdge[];
+    positionUpdates?: Array<{ id: string; position: { x: number; y: number } }>;
+    nodeUpdates?: Array<{ id: string; updates: Partial<AzureNode> }>;
+    parentAssignments?: Array<{ nodeId: string; groupId: string }>;
+  }) => void;
+  setValidationResults: (results: ArchReviewFinding[]) => void;
+  setCostSummary: (summary: CostSummary) => void;
 }
 
 /**
@@ -70,9 +119,13 @@ export function useCopilotActions({
   addEdge,
   clearDiagram,
   updateNodesPositions,
+  updateNode,
   addGroup,
   assignNodeToGroup,
   removeGroup,
+  batchUpdate,
+  setValidationResults,
+  setCostSummary,
 }: UseCopilotActionsProps) {
   // Use refs to always have access to latest state/functions in handlers
   const stateRef = useRef(state);
@@ -81,9 +134,13 @@ export function useCopilotActions({
   const addEdgeRef = useRef(addEdge);
   const clearDiagramRef = useRef(clearDiagram);
   const updateNodesPositionsRef = useRef(updateNodesPositions);
+  const updateNodeRef = useRef(updateNode);
   const addGroupRef = useRef(addGroup);
   const assignNodeToGroupRef = useRef(assignNodeToGroup);
   const removeGroupRef = useRef(removeGroup);
+  const batchUpdateRef = useRef(batchUpdate);
+  const setValidationResultsRef = useRef(setValidationResults);
+  const setCostSummaryRef = useRef(setCostSummary);
 
   // Update refs on each render
   stateRef.current = state;
@@ -92,9 +149,13 @@ export function useCopilotActions({
   addEdgeRef.current = addEdge;
   clearDiagramRef.current = clearDiagram;
   updateNodesPositionsRef.current = updateNodesPositions;
+  updateNodeRef.current = updateNode;
   addGroupRef.current = addGroup;
   assignNodeToGroupRef.current = assignNodeToGroup;
   removeGroupRef.current = removeGroup;
+  batchUpdateRef.current = batchUpdate;
+  setValidationResultsRef.current = setValidationResults;
+  setCostSummaryRef.current = setCostSummary;
 
   // Make diagram state readable by the AI (including groups)
   useCopilotReadable({
@@ -148,6 +209,12 @@ export function useCopilotActions({
         required: true,
       },
       {
+        name: 'description',
+        type: 'string',
+        description: 'A brief explanation of WHY this service is included and its role (1-2 sentences).',
+        required: false,
+      },
+      {
         name: 'x',
         type: 'number',
         description: 'Optional X position on the canvas. If not provided, tier-based auto-positioning is used.',
@@ -160,7 +227,7 @@ export function useCopilotActions({
         required: false,
       },
     ],
-    handler: async ({ serviceType, displayName, x, y }) => {
+    handler: async ({ serviceType, displayName, description, x, y }) => {
       const validType = serviceType as AzureServiceType;
       if (!VALID_SERVICE_TYPES.includes(validType)) {
         return `Invalid service type: ${serviceType}. Valid types are: ${VALID_SERVICE_TYPES.join(', ')}`;
@@ -169,12 +236,16 @@ export function useCopilotActions({
       const category = SERVICE_CATEGORIES[validType];
       const currentState = stateRef.current;
 
+      const isIso = currentState.viewMode === 'isometric';
       let position: { x: number; y: number };
       if (x !== undefined && y !== undefined) {
-        position = { x, y };
+        position = isIso ? snapToIsoGrid(x, y) : snapToCartesianGrid(x, y);
       } else {
-        position = calculateTierBasedPosition(category, currentState.nodes);
+        position = calculateTierBasedPosition(category, currentState.nodes, currentState.viewMode);
       }
+
+      const pricingConfig = getDefaultPricingConfig(validType);
+      const breakdown = calculateServiceCost(validType, pricingConfig, 'eastus');
 
       const newNode: AzureNode = {
         id: generateId(),
@@ -183,14 +254,17 @@ export function useCopilotActions({
         data: {
           serviceType: validType,
           displayName,
+          description: description as string | undefined,
           category,
           status: 'proposed',
-          properties: {},
+          properties: { pricing: pricingConfig },
+          monthlyCost: breakdown.totalMonthlyCost,
+          sku: deriveSku(validType, pricingConfig),
         },
       };
 
       addNodeRef.current(newNode);
-      return `Added ${displayName} (${serviceType}) to the canvas at position (${position.x}, ${position.y}) in the ${category} tier`;
+      return `Added ${displayName} (${serviceType}) to the canvas at position (${position.x}, ${position.y}) in the ${category} tier. Est. cost: $${Math.round(breakdown.totalMonthlyCost)}/mo`;
     },
   });
 
@@ -226,11 +300,19 @@ export function useCopilotActions({
     ],
     handler: async ({ sourceServiceName, targetServiceName, connectionType, isEncrypted }) => {
       const currentState = stateRef.current;
+      const normalizedSrc = normalizeName(sourceServiceName);
+      const normalizedTgt = normalizeName(targetServiceName);
       const sourceNode = currentState.nodes.find(
-        n => n.data.displayName.toLowerCase() === sourceServiceName.toLowerCase()
+        n => n.type !== 'group' && (
+          n.data.displayName.toLowerCase() === sourceServiceName.toLowerCase() ||
+          normalizeName(n.data.displayName) === normalizedSrc
+        )
       );
       const targetNode = currentState.nodes.find(
-        n => n.data.displayName.toLowerCase() === targetServiceName.toLowerCase()
+        n => n.type !== 'group' && (
+          n.data.displayName.toLowerCase() === targetServiceName.toLowerCase() ||
+          normalizeName(n.data.displayName) === normalizedTgt
+        )
       );
 
       if (!sourceNode) {
@@ -308,7 +390,9 @@ export function useCopilotActions({
         ))
         .filter((n): n is AzureNode => n !== undefined);
 
-      // Calculate position based on matched nodes or default
+      const isIso = currentState.viewMode === 'isometric';
+
+      // Calculate position/size from matched nodes or default
       let position = { x: 100, y: 100 };
       let width = 400;
       let height = 200;
@@ -321,12 +405,19 @@ export function useCopilotActions({
           maxX = Math.max(maxX, n.position.x + 80);
           maxY = Math.max(maxY, n.position.y + 55);
         });
-        const padding = 40;
-        const headerHeight = 36;
+        const padding = 60;
+        const headerHeight = 40;
+        const rawW = Math.max(400, maxX - minX + padding * 2);
+        const dims = snapGroupDimensions(rawW);
+        width = dims.width;
+        height = dims.height;
         position = { x: minX - padding, y: minY - padding - headerHeight };
-        width = Math.max(400, maxX - minX + padding * 2);
-        height = Math.max(200, maxY - minY + padding * 2 + headerHeight);
       }
+
+      // Snap position to grid
+      position = isIso
+        ? snapGroupToIsoGrid(position.x, position.y, width)
+        : snapToCartesianGrid(position.x, position.y);
 
       addGroupRef.current({
         id: groupId,
@@ -370,11 +461,19 @@ export function useCopilotActions({
     ],
     handler: async ({ serviceName, groupName }) => {
       const currentState = stateRef.current;
+      const normalizedSvc = normalizeName(serviceName);
+      const normalizedGrp = normalizeName(groupName);
       const service = currentState.nodes.find(
-        n => n.data.displayName.toLowerCase() === serviceName.toLowerCase() && n.type !== 'group'
+        n => n.type !== 'group' && (
+          n.data.displayName.toLowerCase() === serviceName.toLowerCase() ||
+          normalizeName(n.data.displayName) === normalizedSvc
+        )
       );
       const group = currentState.nodes.find(
-        n => n.data.displayName.toLowerCase() === groupName.toLowerCase() && n.type === 'group'
+        n => n.type === 'group' && (
+          n.data.displayName.toLowerCase() === groupName.toLowerCase() ||
+          normalizeName(n.data.displayName) === normalizedGrp
+        )
       );
 
       if (!service) return `Could not find service named "${serviceName}"`;
@@ -398,17 +497,18 @@ export function useCopilotActions({
         attributes: [
           { name: 'serviceType', type: 'string', description: `One of: ${VALID_SERVICE_TYPES.join(', ')}`, required: true },
           { name: 'displayName', type: 'string', description: 'Display name', required: true },
+          { name: 'description', type: 'string', description: 'A brief explanation of WHY this service is included and its role in the architecture (1-2 sentences). Example: "Global load balancer that routes user traffic to the nearest region and provides WAF protection."', required: true },
         ],
       },
       {
         name: 'connections',
         type: 'object[]',
-        description: 'Array of connections between services (by display name)',
-        required: false,
+        description: 'REQUIRED: Array of connections between services. EVERY service must have at least one connection. Use private-endpoint for data services, vnet-integration for compute-to-network, public for external-facing.',
+        required: true,
         attributes: [
-          { name: 'source', type: 'string', description: 'Source service display name', required: true },
-          { name: 'target', type: 'string', description: 'Target service display name', required: true },
-          { name: 'connectionType', type: 'string', description: 'Connection type (public, private-endpoint, vnet-integration, service-endpoint, peering)', required: false },
+          { name: 'source', type: 'string', description: 'Source service display name (must match exactly)', required: true },
+          { name: 'target', type: 'string', description: 'Target service display name (must match exactly)', required: true },
+          { name: 'connectionType', type: 'string', description: 'Connection type: private-endpoint (for data/storage/cache services), vnet-integration (compute to network), public (external traffic), service-endpoint (Azure backbone), peering (VNet to VNet). NEVER omit this.', required: true },
         ],
       },
       {
@@ -425,57 +525,58 @@ export function useCopilotActions({
       },
     ],
     handler: async ({ services, connections, groups }) => {
-      const currentState = stateRef.current;
+      // --- Build everything in memory first, then commit atomically ---
 
-      // Track created nodes by display name for connecting
-      const createdNodes = new Map<string, string>(); // displayName -> id
+      const serviceList = services as Array<{ serviceType: string; displayName: string; description?: string }>;
+      const connList = (connections ?? []) as Array<{ source: string; target: string; connectionType?: string }>;
+      const groupList = (groups ?? []) as Array<{ name: string; groupType: string; subtitle?: string; serviceNames?: string }>;
 
-      // Create all services first
-      const serviceList = services as Array<{ serviceType: string; displayName: string }>;
+      // 1. Build service nodes in memory (no state mutation yet)
+      const nameToId = new Map<string, string>(); // displayName (lowercase) -> nodeId
+      const serviceNodes: AzureNode[] = [];
+
       serviceList.forEach((svc) => {
         const validType = svc.serviceType as AzureServiceType;
         if (!VALID_SERVICE_TYPES.includes(validType)) return;
 
         const category = SERVICE_CATEGORIES[validType];
-        const allNodes = [...currentState.nodes, ...Array.from(createdNodes.entries()).map(([name, id]) => ({
-          id,
-          type: 'azureService',
-          position: { x: 0, y: 0 },
-          data: { serviceType: validType, displayName: name, category, status: 'proposed' as const, properties: {} },
-        }))];
-        const position = calculateTierBasedPosition(category, allNodes);
-
         const nodeId = generateId();
-        const newNode: AzureNode = {
+        nameToId.set(svc.displayName.toLowerCase(), nodeId);
+
+        const pricingConfig = getDefaultPricingConfig(validType);
+        const breakdown = calculateServiceCost(validType, pricingConfig, 'eastus');
+
+        serviceNodes.push({
           id: nodeId,
           type: 'azureService',
-          position,
+          position: { x: 0, y: 0 }, // placeholder -- layout will assign real position
           data: {
             serviceType: validType,
             displayName: svc.displayName,
+            description: svc.description,
             category,
             status: 'proposed',
-            properties: {},
+            properties: { pricing: pricingConfig },
+            monthlyCost: breakdown.totalMonthlyCost,
+            sku: deriveSku(validType, pricingConfig),
           },
-        };
-
-        addNodeRef.current(newNode);
-        createdNodes.set(svc.displayName.toLowerCase(), nodeId);
+        });
       });
 
-      // Create connections
-      const connList = (connections ?? []) as Array<{ source: string; target: string; connectionType?: string }>;
+      // 2. Build edges in memory
+      const edgeNodes: AzureEdge[] = [];
+      const validConnTypes = ['public', 'private-endpoint', 'vnet-integration', 'service-endpoint', 'peering'];
+
       connList.forEach((conn) => {
-        const sourceId = createdNodes.get(conn.source.toLowerCase());
-        const targetId = createdNodes.get(conn.target.toLowerCase());
+        const sourceId = findNodeIdByName(conn.source, nameToId);
+        const targetId = findNodeIdByName(conn.target, nameToId);
         if (!sourceId || !targetId) return;
 
-        const validConnTypes = ['public', 'private-endpoint', 'vnet-integration', 'service-endpoint', 'peering'];
         const connType = validConnTypes.includes(conn.connectionType ?? '')
           ? conn.connectionType as 'public'
           : 'public';
 
-        addEdgeRef.current({
+        edgeNodes.push({
           id: `e-${sourceId}-${targetId}`,
           source: sourceId,
           target: targetId,
@@ -483,45 +584,102 @@ export function useCopilotActions({
         });
       });
 
-      // Create groups and assign members
-      const groupList = (groups ?? []) as Array<{ name: string; groupType: string; subtitle?: string; serviceNames?: string }>;
+      // 3. Build group nodes in memory and record parent assignments
+      const groupNodes: AzureNode[] = [];
+      const parentAssignments: Array<{ nodeId: string; groupId: string }> = [];
+
       groupList.forEach((g) => {
         if (!VALID_GROUP_TYPES.includes(g.groupType as GroupType)) return;
 
         const groupId = generateId();
-        addGroupRef.current({
+        groupNodes.push({
           id: groupId,
-          position: { x: 50, y: 50 },
-          displayName: g.name,
-          groupType: g.groupType as GroupType,
-          subtitle: g.subtitle,
+          type: 'group',
+          position: { x: 0, y: 0 }, // placeholder
+          data: {
+            serviceType: 'resource-group',
+            displayName: g.name,
+            category: 'networking',
+            status: 'proposed',
+            properties: { width: 400, height: 200 },
+            groupType: g.groupType as GroupType,
+            subtitle: g.subtitle,
+          },
         });
 
+        // Map member services to this group (fuzzy match)
         if (g.serviceNames) {
-          const names = g.serviceNames.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+          const names = g.serviceNames.split(',').map(s => s.trim()).filter(Boolean);
           names.forEach(name => {
-            const nodeId = createdNodes.get(name);
+            const nodeId = findNodeIdByName(name, nameToId);
             if (nodeId) {
-              assignNodeToGroupRef.current(nodeId, groupId);
+              // Set parentId on the in-memory service node
+              const svc = serviceNodes.find(n => n.id === nodeId);
+              if (svc) {
+                svc.parentId = groupId;
+              }
+              parentAssignments.push({ nodeId, groupId });
             }
           });
         }
       });
 
-      // Auto-layout after batch creation
-      setTimeout(() => {
-        const latestState = stateRef.current;
-        if (latestState.nodes.length > 0) {
-          const positions = calculateAutoLayout(latestState.nodes, latestState.edges, 'LR');
-          const updates: Array<{ id: string; position: { x: number; y: number } }> = [];
-          positions.forEach((position, id) => { updates.push({ id, position }); });
-          if (updates.length > 0) {
-            updateNodesPositionsRef.current(updates);
-          }
-        }
-      }, 100);
+      // 4. Run auto-layout on the full set (returns snapped positions + group dims)
+      const currentViewMode = stateRef.current.viewMode;
+      const allNodes = [...groupNodes, ...serviceNodes];
+      const layoutResult = await calculateAutoLayout(allNodes, edgeNodes, 'LR', currentViewMode);
 
-      return `Generated architecture: ${serviceList.length} services, ${connList.length} connections, ${groupList.length} groups`;
+      // 5. Apply layout positions to in-memory nodes
+      serviceNodes.forEach((node) => {
+        const pos = layoutResult.positions.get(node.id);
+        if (pos) {
+          node.position = pos;
+        }
+      });
+
+      groupNodes.forEach((node) => {
+        const pos = layoutResult.positions.get(node.id);
+        if (pos) {
+          node.position = pos;
+        }
+        const dims = layoutResult.groupDimensions.get(node.id);
+        if (dims) {
+          node.data = {
+            ...node.data,
+            properties: { ...node.data.properties, width: dims.width, height: dims.height },
+          };
+        }
+        // Apply group nesting (e.g., VNet inside RG)
+        const nestParentId = layoutResult.groupNesting.get(node.id);
+        if (nestParentId) {
+          node.parentId = nestParentId;
+          parentAssignments.push({ nodeId: node.id, groupId: nestParentId });
+        }
+      });
+
+      // 6. Commit everything atomically via batchUpdate -- no setTimeout
+      batchUpdateRef.current({
+        addNodes: [...groupNodes, ...serviceNodes],
+        addEdges: edgeNodes,
+        parentAssignments,
+        positionUpdates: allNodes.map(n => ({ id: n.id, position: n.position })),
+      });
+
+      // 7. Run WAF review and populate toolbar badges
+      const wafResult = runWafReview([...groupNodes, ...serviceNodes], edgeNodes);
+      setValidationResultsRef.current(wafResult.findings);
+      setCostSummaryRef.current(wafResult.costSummary);
+
+      const criticalCount = wafResult.findings.filter(f => f.severity === 'critical').length;
+      const warningCount = wafResult.findings.filter(f => f.severity === 'warning').length;
+      const costStr = `$${Math.round(wafResult.costSummary.monthly).toLocaleString()}/mo`;
+      const wafMsg = criticalCount > 0
+        ? ` WAF Review: ${criticalCount} critical, ${warningCount} warnings.`
+        : warningCount > 0
+          ? ` WAF Review: ${warningCount} warnings, no critical issues.`
+          : ' WAF Review: All checks passed!';
+
+      return `Generated architecture: ${serviceNodes.length} services, ${edgeNodes.length} connections, ${groupNodes.length} groups. Est. cost: ${costStr}.${wafMsg}`;
     },
   });
 
@@ -545,16 +703,37 @@ export function useCopilotActions({
       }
 
       const layoutDirection = direction === 'TB' ? 'TB' : 'LR';
-      const positions = calculateAutoLayout(currentState.nodes, currentState.edges, layoutDirection);
+      const layoutResult = await calculateAutoLayout(currentState.nodes, currentState.edges, layoutDirection, currentState.viewMode);
 
-      const updates: Array<{ id: string; position: { x: number; y: number } }> = [];
-      positions.forEach((position, id) => {
-        updates.push({ id, position });
+      // Build position updates and node updates (group dims) from layout result
+      const positionUpdates: Array<{ id: string; position: { x: number; y: number } }> = [];
+      layoutResult.positions.forEach((position, id) => {
+        positionUpdates.push({ id, position });
       });
 
-      if (updates.length > 0) {
-        updateNodesPositionsRef.current(updates);
-      }
+      const nodeUpdates: Array<{ id: string; updates: Partial<AzureNode> }> = [];
+      layoutResult.groupDimensions.forEach((dims, id) => {
+        const node = currentState.nodes.find(n => n.id === id);
+        if (node) {
+          nodeUpdates.push({
+            id,
+            updates: {
+              data: {
+                ...node.data,
+                properties: { ...node.data.properties, width: dims.width, height: dims.height },
+              },
+            },
+          });
+        }
+      });
+
+      // Apply group nesting (e.g., VNet inside RG)
+      const parentAssignments: Array<{ nodeId: string; groupId: string }> = [];
+      layoutResult.groupNesting.forEach((parentGroupId, childGroupId) => {
+        parentAssignments.push({ nodeId: childGroupId, groupId: parentGroupId });
+      });
+
+      batchUpdateRef.current({ positionUpdates, nodeUpdates, parentAssignments });
 
       return `Reorganized ${currentState.nodes.length} services using ${layoutDirection === 'LR' ? 'horizontal' : 'vertical'} tier-based layout`;
     },
@@ -574,8 +753,10 @@ export function useCopilotActions({
     ],
     handler: async ({ serviceName }) => {
       const currentState = stateRef.current;
+      const normalizedName = normalizeName(serviceName);
       const node = currentState.nodes.find(
-        n => n.data.displayName.toLowerCase() === serviceName.toLowerCase()
+        n => n.data.displayName.toLowerCase() === serviceName.toLowerCase() ||
+             normalizeName(n.data.displayName) === normalizedName
       );
 
       if (!node) {

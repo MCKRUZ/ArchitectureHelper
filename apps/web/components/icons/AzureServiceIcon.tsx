@@ -252,6 +252,71 @@ function LogAnalyticsIcon({ className }: { className?: string }) {
   );
 }
 
+// Application Insights
+function ApplicationInsightsIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect x="3" y="3" width="18" height="18" rx="3" fill="#68217A" />
+      <circle cx="10" cy="11" r="4" stroke="white" strokeWidth="1.5" fill="none" />
+      <path d="M13 14l4 4" stroke="white" strokeWidth="2" strokeLinecap="round" />
+      <path d="M8 11h4" stroke="white" strokeWidth="1.5" strokeLinecap="round" />
+      <path d="M9 9l1 2 1-3 1 1" stroke="white" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+// AI Search
+function AiSearchIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect x="3" y="3" width="18" height="18" rx="3" fill="#0078D4" />
+      <circle cx="11" cy="11" r="4" stroke="white" strokeWidth="1.5" fill="none" />
+      <path d="M14 14l4 4" stroke="white" strokeWidth="2" strokeLinecap="round" />
+      <path d="M15 6l1 2-1 1" stroke="#50E6FF" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx="16" cy="5" r="0.8" fill="#50E6FF" />
+    </svg>
+  );
+}
+
+// DDoS Protection
+function DdosProtectionIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M12 2L3 7v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-9-5z" fill="#E74856" />
+      <path d="M12 8l1 3h-2l1.5 5-3-4h2L10 8h2z" fill="white" />
+    </svg>
+  );
+}
+
+// Event Grid
+function EventGridIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect x="3" y="3" width="18" height="18" rx="2" fill="#00B7C3" />
+      <circle cx="8" cy="8" r="1.5" fill="white" />
+      <circle cx="12" cy="8" r="1.5" fill="white" />
+      <circle cx="16" cy="8" r="1.5" fill="white" />
+      <circle cx="8" cy="12" r="1.5" fill="white" />
+      <circle cx="12" cy="12" r="1.5" fill="white" />
+      <circle cx="16" cy="12" r="1.5" fill="white" />
+      <path d="M12 15l4 3" stroke="white" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+// Static Web App
+function StaticWebAppIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect x="3" y="4" width="18" height="14" rx="2" fill="#10B981" />
+      <rect x="3" y="4" width="18" height="4" rx="2" fill="#059669" />
+      <circle cx="6" cy="6" r="1" fill="white" />
+      <circle cx="9" cy="6" r="1" fill="white" />
+      <path d="M7 11h10M7 14h6" stroke="white" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 function ResourceGroupIcon({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -284,5 +349,10 @@ const ICONS: Record<AzureServiceType, React.FC<{ className?: string }>> = {
   'azure-openai': AzureOpenAiIcon,
   'entra-id': EntraIdIcon,
   'log-analytics': LogAnalyticsIcon,
+  'application-insights': ApplicationInsightsIcon,
+  'ai-search': AiSearchIcon,
+  'ddos-protection': DdosProtectionIcon,
+  'event-grid': EventGridIcon,
+  'static-web-app': StaticWebAppIcon,
   'resource-group': ResourceGroupIcon,
 };

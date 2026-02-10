@@ -59,9 +59,20 @@ const AZURE_SERVICES: ServiceDefinition[] = [
 
   // AI
   { type: 'azure-openai', name: 'Azure OpenAI', category: 'ai-ml', description: 'GPT models' },
+  { type: 'ai-search', name: 'AI Search', category: 'ai-ml', description: 'Cognitive search' },
 
   // Management
   { type: 'log-analytics', name: 'Log Analytics', category: 'management', description: 'Monitoring & logs' },
+  { type: 'application-insights', name: 'Application Insights', category: 'management', description: 'APM & telemetry' },
+
+  // Security
+  { type: 'ddos-protection', name: 'DDoS Protection', category: 'security', description: 'DDoS mitigation' },
+
+  // Messaging
+  { type: 'event-grid', name: 'Event Grid', category: 'messaging', description: 'Event routing' },
+
+  // Web
+  { type: 'static-web-app', name: 'Static Web App', category: 'web', description: 'Static site hosting' },
 ];
 
 // Category display names and icons

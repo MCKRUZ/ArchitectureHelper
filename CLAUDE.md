@@ -60,6 +60,15 @@ After full-stack changes: run both.
 - Don't use `DbContext` directly in controllers — go through MediatR handlers.
 - Don't register Singleton services that depend on Scoped services in DI.
 
+## Task Approach
+When given a feature request or task:
+1. **Clarify before coding.** If the request is ambiguous or could go multiple directions, ask 1-2 targeted questions first. Don't guess at requirements.
+2. **Present options when trade-offs exist.** If there are meaningful architectural choices (e.g., client vs. server component, new node type vs. extending existing, REST endpoint vs. server action), briefly present 2-3 options with trade-offs and let me choose.
+3. **Scope the work.** Before writing code, state what you plan to do in a short plan: which files you'll create/modify, what the approach is, and what you'll verify. Wait for a thumbs up on big changes.
+4. **Implement in layers.** For full-stack features: domain model first → application layer → API endpoint → frontend component → integration test. Don't jump straight to UI.
+5. **Verify as you go.** Run the relevant build/test commands after each meaningful change, not just at the end.
+6. **Flag risks.** If something could break existing functionality, affect performance, or have security implications, call it out before proceeding.
+
 ## Compact Instructions
 When compacting, always preserve:
 - Current task status and next steps

@@ -1,7 +1,7 @@
 'use client';
 
-import { memo } from 'react';
-import { Handle, Position, NodeProps, NodeResizer } from '@xyflow/react';
+import { memo, useState, useCallback } from 'react';
+import { Handle, Position, NodeProps, useReactFlow } from '@xyflow/react';
 import type { AzureNodeData, GroupType } from '@/lib/state/types';
 
 interface GroupNodeProps extends NodeProps {
@@ -14,31 +14,118 @@ const GROUP_COLORS: Record<GroupType, string> = {
   'subnet': '#8B5CF6',
 };
 
-// The diamond is drawn in a 200x100 viewBox (2:1 ratio = slope +/-0.5).
-// With preserveAspectRatio="none" it stretches to fill the node.
-// At the default 2:1 node size the edges perfectly match the iso grid.
-// atan(0.5) ≈ 26.57° — the angle of the top-right edge at 2:1.
-const ISO_ANGLE = Math.atan(0.5) * (180 / Math.PI); // ~26.57°
+type DiamondVertex = 'north' | 'south' | 'east' | 'west';
+
+const MIN_W = 160;
 
 export const GroupNode = memo(function GroupNode({
+  id,
   data,
   selected,
 }: GroupNodeProps) {
   const groupType = data.groupType ?? 'resource-group';
   const color = GROUP_COLORS[groupType];
+  const [isHovered, setIsHovered] = useState(false);
+  const { setNodes, getViewport, getNode } = useReactFlow();
+
+  const active = selected || isHovered;
+
+  // Custom resize: anchors the OPPOSITE diamond vertex, maintains 2:1 ratio
+  const startResize = useCallback((vertex: DiamondVertex, e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+
+    const node = getNode(id);
+    if (!node) return;
+
+    const startMouseX = e.clientX;
+    const startMouseY = e.clientY;
+    const startW = (node.style?.width as number) || 400;
+    const startH = (node.style?.height as number) || 200;
+    const startX = node.position.x;
+    const startY = node.position.y;
+
+    // Anchor = the opposite diamond vertex (stays fixed during resize)
+    let anchor: { x: number; y: number };
+    switch (vertex) {
+      case 'north': anchor = { x: startX + startW / 2, y: startY + startH }; break;
+      case 'south': anchor = { x: startX + startW / 2, y: startY }; break;
+      case 'east':  anchor = { x: startX, y: startY + startH / 2 }; break;
+      case 'west':  anchor = { x: startX + startW, y: startY + startH / 2 }; break;
+    }
+
+    const onMouseMove = (moveEvent: MouseEvent) => {
+      const zoom = getViewport().zoom;
+      const deltaX = (moveEvent.clientX - startMouseX) / zoom;
+      const deltaY = (moveEvent.clientY - startMouseY) / zoom;
+
+      let newW: number, newH: number, newX: number, newY: number;
+
+      switch (vertex) {
+        case 'south': // drag down → bigger
+          newH = Math.max(MIN_W / 2, startH + deltaY);
+          newW = 2 * newH;
+          newX = anchor.x - newW / 2;
+          newY = anchor.y; // north vertex stays fixed
+          break;
+        case 'north': // drag up → bigger
+          newH = Math.max(MIN_W / 2, startH - deltaY);
+          newW = 2 * newH;
+          newX = anchor.x - newW / 2;
+          newY = anchor.y - newH; // south vertex stays fixed
+          break;
+        case 'east': // drag right → bigger
+          newW = Math.max(MIN_W, startW + deltaX);
+          newH = newW / 2;
+          newX = anchor.x; // west vertex stays fixed
+          newY = anchor.y - newH / 2;
+          break;
+        case 'west': // drag left → bigger
+          newW = Math.max(MIN_W, startW - deltaX);
+          newH = newW / 2;
+          newX = anchor.x - newW; // east vertex stays fixed
+          newY = anchor.y - newH / 2;
+          break;
+      }
+
+      setNodes((nds) =>
+        nds.map((n) =>
+          n.id === id
+            ? { ...n, position: { x: newX, y: newY }, style: { ...n.style, width: newW, height: newH } }
+            : n
+        )
+      );
+    };
+
+    const onMouseUp = () => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  }, [id, getNode, getViewport, setNodes]);
 
   return (
-    <div style={{ width: '100%', height: '100%', position: 'relative' }}>
-      <NodeResizer
-        minWidth={160}
-        minHeight={80}
-        keepAspectRatio
-        isVisible={selected}
-        lineClassName="!border-transparent"
-        handleClassName="!w-2.5 !h-2.5 !bg-blue-500 !border-white"
-      />
+    <div
+      style={{ width: '100%', height: '100%', position: 'relative' }}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+    >
+      {/* Custom resize handles at diamond vertices */}
+      {active && (
+        <>
+          <div className="group-resize-handle group-resize-handle--north"
+            onMouseDown={(e) => startResize('north', e)} />
+          <div className="group-resize-handle group-resize-handle--east"
+            onMouseDown={(e) => startResize('east', e)} />
+          <div className="group-resize-handle group-resize-handle--south"
+            onMouseDown={(e) => startResize('south', e)} />
+          <div className="group-resize-handle group-resize-handle--west"
+            onMouseDown={(e) => startResize('west', e)} />
+        </>
+      )}
 
-      {/* Isometric diamond + flat label — fixed 2:1 viewBox, stretches to fill node */}
       <svg
         width="100%"
         height="100%"
@@ -46,34 +133,35 @@ export const GroupNode = memo(function GroupNode({
         preserveAspectRatio="none"
         style={{ position: 'absolute', top: 0, left: 0, overflow: 'visible', pointerEvents: 'none' }}
       >
+        {/* Visible dashed outline */}
         <polygon
-          className="group-drag-handle"
           points="100,0 200,50 100,100 0,50"
           fill="none"
           stroke={color}
           strokeWidth={selected ? 6 : 4}
           strokeDasharray="8 4"
           vectorEffect="non-scaling-stroke"
+          opacity={active ? 1 : 0.6}
+          style={{ transition: 'opacity 0.15s ease' }}
         />
-        {/* Isometric parallelogram label — centered on top-right edge.
-             All 4 edges follow grid lines (slopes ±0.5).
-             BL(120,10) BR(180,40) on edge; TL(132,4) TR(192,34) offset (12,-6).
-             Rounded corners via quadratic bezier at each vertex. */}
+
+        {/* Label — drag handle for moving */}
         <path
-          d="M 122.2,11.1 L 177.8,38.9 Q 180,40 182.2,38.9 L 189.8,35.1 Q 192,34 189.8,32.9 L 134.2,5.1 Q 132,4 129.8,5.1 L 122.2,8.9 Q 120,10 122.2,11.1 Z"
+          className="group-label"
+          d="M 110.2,5.1 L 183.8,41.9 Q 186,43 188.2,41.9 L 198.8,36.6 Q 201,35.5 198.8,34.4 L 125.2,-1.4 Q 123,-2.5 120.8,-1.4 L 110.2,3.9 Q 108,5 110.2,5.1 Z"
           fill={color}
+          opacity={active ? 1 : 0.85}
+          style={{ transition: 'opacity 0.15s ease, filter 0.15s ease', filter: isHovered ? 'brightness(1.15)' : 'none' }}
         />
-        {/* Text with isometric matrix so letters lie flat on the surface.
-             matrix(1,0.5,-1,0.5) maps: +x→edge direction, +y→other iso direction.
-             Vertical strokes in letters follow slope -0.5, horizontals follow +0.5. */}
+
         <text
-          transform="matrix(1, 0.5, -1, 0.5, 156, 22)"
+          transform="matrix(1, 0.5, -1, 0.5, 161, 20)"
           textAnchor="middle"
           dominantBaseline="central"
           fill="white"
-          fontSize="6.5"
+          fontSize="7"
           fontWeight="600"
-          style={{ fontFamily: 'system-ui, -apple-system, sans-serif' }}
+          style={{ fontFamily: 'system-ui, -apple-system, sans-serif', pointerEvents: 'none' }}
         >
           {data.displayName}
         </text>
