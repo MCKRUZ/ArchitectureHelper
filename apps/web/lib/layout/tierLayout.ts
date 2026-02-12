@@ -67,6 +67,8 @@ export async function calculateTierLayout(
   edges: AzureEdge[],
   viewMode: ViewMode
 ): Promise<LayoutResult> {
+  console.log(`[tierLayout] ===== STARTING LAYOUT: ${nodes.length} nodes, viewMode=${viewMode} =====`);
+
   const positions = new Map<string, { x: number; y: number }>();
   const groupDimensions = new Map<string, { width: number; height: number }>();
   const groupNesting = new Map<string, string>();
@@ -166,6 +168,12 @@ export async function calculateTierLayout(
     const childGroups = groupNodes.filter(g => groupNesting.get(g.id) === group.id);
     const allChildren = [...childServices, ...childGroups];
 
+    // Track service-to-group assignments in groupNesting map
+    // This ensures services get their parentIds updated to match the new layout
+    childServices.forEach(service => {
+      groupNesting.set(service.id, group.id);
+    });
+
     if (allChildren.length === 0) {
       // Empty group: fixed size
       const pos = isIso
@@ -250,6 +258,25 @@ export async function calculateTierLayout(
       : snapCartesianGroupDimensions(groupWidth, groupHeight);
     groupDimensions.set(group.id, groupDims);
   }
+
+  // Debug logging
+  console.log('[tierLayout] Layout calculation complete:');
+  console.log(`  - ${serviceNodes.length} services (${ungroupedServices.length} ungrouped, ${groupedServices.length} grouped)`);
+  console.log(`  - ${groupNodes.length} groups`);
+  console.log('  Sample service positions:');
+  serviceNodes.slice(0, 3).forEach(s => {
+    const pos = positions.get(s.id);
+    const newParentId = groupNesting.get(s.id);
+    console.log(`    ${s.data.displayName}: ${JSON.stringify(pos)}, OLD parentId: ${s.parentId || 'none'}, NEW parentId: ${newParentId || 'none'}`);
+  });
+  console.log('  Sample group positions:');
+  groupNodes.slice(0, 2).forEach(g => {
+    const pos = positions.get(g.id);
+    const dims = groupDimensions.get(g.id);
+    console.log(`    ${g.data.displayName} (ID: ${g.id}): pos=${JSON.stringify(pos)}, dims=${JSON.stringify(dims)}`);
+  });
+  console.log(`  groupNesting map has ${groupNesting.size} entries`);
+  console.log('  All group IDs:', groupNodes.map(g => `${g.data.displayName}=${g.id}`).join(', '));
 
   return {
     positions,

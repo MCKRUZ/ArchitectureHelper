@@ -42,7 +42,17 @@
       "Bash(del \"C:\\\\Users\\\\kruz7\\\\OneDrive\\\\Documents\\\\Code Repos\\\\MCKRUZ\\\\ArchitectureHelper\\\\layout-engine-evaluation.md\" \"C:\\\\Users\\\\kruz7\\\\OneDrive\\\\Documents\\\\Code Repos\\\\MCKRUZ\\\\ArchitectureHelper\\\\layout-engine-executive-summary.md\")",
       "Bash(curl:*)",
       "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\kruz7\\\\OneDrive\\\\Documents\\\\Code Repos\\\\MCKRUZ\\\\ArchitectureHelper\\\\apps\\\\web\" -Filter \"*azure-icons*\" -Recurse -Directory)",
-      "Bash(Select-Object -First 5 FullName)"
+      "Bash(Select-Object -First 5 FullName)",
+      "Bash(Get-ChildItem \"C:\\\\Users\\\\kruz7\\\\OneDrive\\\\Documents\\\\Code Repos\\\\MCKRUZ\\\\ArchitectureHelper\\\\.screenshots\" -Filter \"*.png\")",
+      "Bash(Sort-Object LastWriteTime -Descending)",
+      "Bash(Select-Object:*)",
+      "Bash(Format-Table Name, LastWriteTime, Length)",
+      "Bash(Start-Sleep -Seconds 30)",
+      "Bash(node:*)",
+      "Bash(ls:*)",
+      "Bash(git commit:*)",
+      "Bash(Get-ChildItem \"C:\\\\Users\\\\kruz7\\\\.claude\\\\sessions\"\" -Filter \"*2026-02-1*.tmp \")",
+      "Bash(Start-Process \"http://localhost:3004\")"
     ],
     "deny": [
       "Read(./.env)",

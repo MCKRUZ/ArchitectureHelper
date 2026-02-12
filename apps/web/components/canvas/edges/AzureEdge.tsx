@@ -143,8 +143,9 @@ export const AzureEdge = memo(function AzureEdge({
 
           const nodeX = node.position.x;
           const nodeY = node.position.y;
-          const nodeW = node.measured?.width || FLAT_NODE_W;
-          const nodeH = node.measured?.height || FLAT_NODE_H;
+          // Use standard flat node dimensions for collision detection
+          const nodeW = FLAT_NODE_W;
+          const nodeH = FLAT_NODE_H;
 
           // Check horizontal segment collision
           const horizontalOverlap =

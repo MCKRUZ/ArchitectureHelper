@@ -11,7 +11,8 @@
  */
 
 import type { AzureNode, AzureEdge, AzureServiceCategory } from '@/lib/state/types';
-import { calculateTierLayout, calculateTierBasedPosition } from './tierLayout';
+import { calculateTierLayoutSimple } from './tierLayoutSimple';
+import { calculateTierBasedPosition } from './tierLayout';
 
 type ViewMode = '2d' | 'isometric' | 'cost-heatmap' | 'compliance';
 
@@ -72,8 +73,8 @@ export async function calculateAutoLayout(
   direction: 'LR' | 'TB' = 'LR',
   viewMode: ViewMode = 'isometric'
 ): Promise<LayoutResult> {
-  // Simple tier-based layout - no complex algorithms needed
-  return calculateTierLayout(nodes, edges, viewMode);
+  // Use SIMPLE tier-based layout (rewritten for clarity and correctness)
+  return calculateTierLayoutSimple(nodes, edges, viewMode);
 }
 
 /**

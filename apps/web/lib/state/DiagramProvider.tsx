@@ -176,7 +176,17 @@ export function DiagramProvider({ children }: DiagramProviderProps) {
   );
 
   const clearDiagram = useCallback(() => {
+    // Clear localStorage to prevent stale data
+    try {
+      localStorage.removeItem('azurecraft-diagram');
+      console.log('[DiagramProvider] Cleared localStorage');
+    } catch (error) {
+      console.error('[DiagramProvider] Failed to clear localStorage:', error);
+    }
+
+    // Reset to initial state
     setState(createInitialState());
+    console.log('[DiagramProvider] Diagram cleared completely');
   }, [setState]);
 
   const setValidationResults = useCallback(
@@ -477,7 +487,7 @@ export function DiagramProvider({ children }: DiagramProviderProps) {
           currentViewMode
         );
 
-        // Build position updates and node updates from layout result
+        // Build position updates, dimension updates, and parentId updates from layout result
         const positionUpdates: Array<{ id: string; position: { x: number; y: number } }> = [];
         layoutResult.positions.forEach((position, id) => {
           positionUpdates.push({ id, position });
@@ -497,6 +507,12 @@ export function DiagramProvider({ children }: DiagramProviderProps) {
               },
             });
           }
+        });
+
+        // Apply parentId updates from groupNesting map
+        const parentIdUpdates: Array<{ id: string; parentId: string }> = [];
+        layoutResult.groupNesting.forEach((parentId, nodeId) => {
+          parentIdUpdates.push({ id: nodeId, parentId });
         });
 
         // Apply updates via batchUpdate
@@ -532,6 +548,18 @@ export function DiagramProvider({ children }: DiagramProviderProps) {
             };
           }
 
+          // Apply parentId updates from groupNesting
+          if (parentIdUpdates.length > 0) {
+            const parentMap = new Map(parentIdUpdates.map((u) => [u.id, u.parentId]));
+            s = {
+              ...s,
+              nodes: s.nodes.map((n) => {
+                const newParentId = parentMap.get(n.id);
+                return newParentId ? { ...n, parentId: newParentId } : n;
+              }),
+            };
+          }
+
           return {
             ...s,
             lastModified: new Date().toISOString(),
@@ -547,6 +575,38 @@ export function DiagramProvider({ children }: DiagramProviderProps) {
       }
     })();
   }, [state.viewMode, state.nodes.length, state.nodes, state.edges]);
+
+  // LocalStorage persistence (load on mount)
+  const hasLoadedFromStorage = useRef(false);
+  useEffect(() => {
+    if (hasLoadedFromStorage.current) return;
+
+    try {
+      const stored = localStorage.getItem('azurecraft-diagram');
+      if (stored) {
+        const data = JSON.parse(stored) as DiagramState;
+        setStateInternal(data);
+        hasLoadedFromStorage.current = true;
+        console.log('[DiagramProvider] Loaded diagram from localStorage - preserving existing positions');
+      }
+    } catch (error) {
+      console.error('[DiagramProvider] Failed to load from localStorage:', error);
+    }
+  }, []); // Only run on mount
+
+  // LocalStorage persistence (save on state change, debounced)
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      try {
+        localStorage.setItem('azurecraft-diagram', JSON.stringify(state));
+        console.log('[DiagramProvider] Saved diagram to localStorage');
+      } catch (error) {
+        console.error('[DiagramProvider] Failed to save to localStorage:', error);
+      }
+    }, 500); // Debounce 500ms
+
+    return () => clearTimeout(timeoutId);
+  }, [state]);
 
   const value: DiagramContextValue = useMemo(
     () => ({
