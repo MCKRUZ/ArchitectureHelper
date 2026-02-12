@@ -62,12 +62,23 @@
    React Flow - Edge layer behind nodes
    ======================================== */
 
+/* Force edges to always render behind nodes */
+.react-flow__edges {
+  z-index: 1 !important;
+}
+
 /* ========================================
    React Flow - Node Styles
    ======================================== */
 
+/* Force nodes to always render on top of edges */
+.react-flow__nodes {
+  z-index: 2 !important;
+}
+
 .react-flow__node {
   @apply transition-all duration-200;
+  z-index: 2 !important;
 }
 
 /* Ensure proper z-index stacking for nodes */
@@ -222,6 +233,7 @@
 
 .react-flow__edge {
   @apply transition-opacity duration-200;
+  z-index: 1 !important; /* Always behind nodes */
 }
 
 .react-flow__edge:hover {
@@ -229,7 +241,8 @@
 }
 
 .react-flow__edge.selected {
-  z-index: 10 !important;
+  /* Keep edges below nodes even when selected */
+  z-index: 1 !important;
 }
 
 /* Azure edge path styling */

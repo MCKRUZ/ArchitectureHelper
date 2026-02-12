@@ -9,6 +9,7 @@ import { snapToCartesianGrid } from '@/lib/layout/cartesianSnap';
 import type { AzureServiceType, AzureServiceCategory, DiagramState, AzureNode, AzureEdge, GroupType, ArchReviewFinding, CostSummary } from '@/lib/state/types';
 import { runWafReview } from '@/lib/waf/wafReview';
 import { getDefaultPricingConfig, calculateServiceCost, deriveSku } from '@/lib/pricing/calculateCost';
+import { runFlowValidation } from '@/lib/validation/flowValidation';
 
 // Map service types to categories
 const SERVICE_CATEGORIES: Record<AzureServiceType, AzureServiceCategory> = {
@@ -487,16 +488,16 @@ export function useCopilotActions({
   // Action to generate a complete architecture in one call
   useCopilotAction({
     name: 'generateArchitecture',
-    description: 'Generate a complete Azure architecture from a description. Creates all services, connections, and optionally groups in one call. Use this for building complete architectures quickly.',
+    description: 'Generate a complete Azure architecture from a description. Creates all services, connections, and optionally groups in one call. Supports multiple environments (dev, test, uat, prod) which will create separate copies of the architecture for each environment.',
     parameters: [
       {
         name: 'services',
         type: 'object[]',
-        description: 'Array of services to create',
+        description: 'Array of services to create (will be duplicated for each environment if environments parameter is provided)',
         required: true,
         attributes: [
           { name: 'serviceType', type: 'string', description: `One of: ${VALID_SERVICE_TYPES.join(', ')}`, required: true },
-          { name: 'displayName', type: 'string', description: 'Display name', required: true },
+          { name: 'displayName', type: 'string', description: 'Display name (environment suffix will be added automatically if multi-env)', required: true },
           { name: 'description', type: 'string', description: 'A brief explanation of WHY this service is included and its role in the architecture (1-2 sentences). Example: "Global load balancer that routes user traffic to the nearest region and provides WAF protection."', required: true },
         ],
       },
@@ -523,64 +524,87 @@ export function useCopilotActions({
           { name: 'serviceNames', type: 'string', description: 'Comma-separated member service display names', required: false },
         ],
       },
+      {
+        name: 'environments',
+        type: 'string[]',
+        description: 'Optional: Array of environment names (e.g., ["dev", "test", "uat", "prod"]). If provided, will create separate copies of the architecture for each environment with environment-specific naming and resource groups.',
+        required: false,
+      },
     ],
-    handler: async ({ services, connections, groups }) => {
+    handler: async ({ services, connections, groups, environments }) => {
       // --- Build everything in memory first, then commit atomically ---
 
       const serviceList = services as Array<{ serviceType: string; displayName: string; description?: string }>;
       const connList = (connections ?? []) as Array<{ source: string; target: string; connectionType?: string }>;
       const groupList = (groups ?? []) as Array<{ name: string; groupType: string; subtitle?: string; serviceNames?: string }>;
+      const envList = (environments ?? []) as string[];
+
+      // Determine if this is multi-environment
+      const isMultiEnv = envList.length > 0;
+      const envsToProcess = isMultiEnv ? envList : [''];
 
       // 1. Build service nodes in memory (no state mutation yet)
       const nameToId = new Map<string, string>(); // displayName (lowercase) -> nodeId
       const serviceNodes: AzureNode[] = [];
 
-      serviceList.forEach((svc) => {
-        const validType = svc.serviceType as AzureServiceType;
-        if (!VALID_SERVICE_TYPES.includes(validType)) return;
+      // Helper to add environment suffix to names
+      const withEnvSuffix = (name: string, env: string) =>
+        env ? `${name} ${env.charAt(0).toUpperCase() + env.slice(1)}` : name;
 
-        const category = SERVICE_CATEGORIES[validType];
-        const nodeId = generateId();
-        nameToId.set(svc.displayName.toLowerCase(), nodeId);
+      // Create services for each environment
+      envsToProcess.forEach((env) => {
+        serviceList.forEach((svc) => {
+          const validType = svc.serviceType as AzureServiceType;
+          if (!VALID_SERVICE_TYPES.includes(validType)) return;
 
-        const pricingConfig = getDefaultPricingConfig(validType);
-        const breakdown = calculateServiceCost(validType, pricingConfig, 'eastus');
+          const category = SERVICE_CATEGORIES[validType];
+          const nodeId = generateId();
+          const displayName = withEnvSuffix(svc.displayName, env);
+          nameToId.set(displayName.toLowerCase(), nodeId);
 
-        serviceNodes.push({
-          id: nodeId,
-          type: 'azureService',
-          position: { x: 0, y: 0 }, // placeholder -- layout will assign real position
-          data: {
-            serviceType: validType,
-            displayName: svc.displayName,
-            description: svc.description,
-            category,
-            status: 'proposed',
-            properties: { pricing: pricingConfig },
-            monthlyCost: breakdown.totalMonthlyCost,
-            sku: deriveSku(validType, pricingConfig),
-          },
+          const pricingConfig = getDefaultPricingConfig(validType);
+          const breakdown = calculateServiceCost(validType, pricingConfig, 'eastus');
+
+          serviceNodes.push({
+            id: nodeId,
+            type: 'azureService',
+            position: { x: 0, y: 0 }, // placeholder -- layout will assign real position
+            data: {
+              serviceType: validType,
+              displayName,
+              description: svc.description,
+              category,
+              status: 'proposed',
+              properties: { pricing: pricingConfig },
+              monthlyCost: breakdown.totalMonthlyCost,
+              sku: deriveSku(validType, pricingConfig),
+            },
+          });
         });
       });
 
-      // 2. Build edges in memory
+      // 2. Build edges in memory (duplicate for each environment)
       const edgeNodes: AzureEdge[] = [];
       const validConnTypes = ['public', 'private-endpoint', 'vnet-integration', 'service-endpoint', 'peering'];
 
-      connList.forEach((conn) => {
-        const sourceId = findNodeIdByName(conn.source, nameToId);
-        const targetId = findNodeIdByName(conn.target, nameToId);
-        if (!sourceId || !targetId) return;
+      envsToProcess.forEach((env) => {
+        connList.forEach((conn) => {
+          const sourceName = withEnvSuffix(conn.source, env);
+          const targetName = withEnvSuffix(conn.target, env);
+          const sourceId = findNodeIdByName(sourceName, nameToId);
+          const targetId = findNodeIdByName(targetName, nameToId);
+          if (!sourceId || !targetId) return;
 
-        const connType = validConnTypes.includes(conn.connectionType ?? '')
-          ? conn.connectionType as 'public'
-          : 'public';
+          const connType = validConnTypes.includes(conn.connectionType ?? '')
+            ? conn.connectionType as 'public'
+            : 'public';
 
-        edgeNodes.push({
-          id: `e-${sourceId}-${targetId}`,
-          source: sourceId,
-          target: targetId,
-          data: { connectionType: connType, isEncrypted: true },
+          edgeNodes.push({
+            id: `e-${sourceId}-${targetId}`,
+            source: sourceId,
+            target: targetId,
+            data: { connectionType: connType, isEncrypted: true },
+          });
         });
       });
 
@@ -588,40 +612,76 @@ export function useCopilotActions({
       const groupNodes: AzureNode[] = [];
       const parentAssignments: Array<{ nodeId: string; groupId: string }> = [];
 
-      groupList.forEach((g) => {
-        if (!VALID_GROUP_TYPES.includes(g.groupType as GroupType)) return;
-
-        const groupId = generateId();
-        groupNodes.push({
-          id: groupId,
-          type: 'group',
-          position: { x: 0, y: 0 }, // placeholder
-          data: {
-            serviceType: 'resource-group',
-            displayName: g.name,
-            category: 'networking',
-            status: 'proposed',
-            properties: { width: 400, height: 200 },
-            groupType: g.groupType as GroupType,
-            subtitle: g.subtitle,
-          },
-        });
-
-        // Map member services to this group (fuzzy match)
-        if (g.serviceNames) {
-          const names = g.serviceNames.split(',').map(s => s.trim()).filter(Boolean);
-          names.forEach(name => {
-            const nodeId = findNodeIdByName(name, nameToId);
-            if (nodeId) {
-              // Set parentId on the in-memory service node
-              const svc = serviceNodes.find(n => n.id === nodeId);
-              if (svc) {
-                svc.parentId = groupId;
-              }
-              parentAssignments.push({ nodeId, groupId });
-            }
+      // Create groups for each environment
+      envsToProcess.forEach((env) => {
+        // If multi-env, create an environment-specific resource group
+        if (isMultiEnv && env) {
+          const envRgId = generateId();
+          const envRgName = `${env.charAt(0).toUpperCase() + env.slice(1)}-RG`;
+          groupNodes.push({
+            id: envRgId,
+            type: 'group',
+            position: { x: 0, y: 0 },
+            data: {
+              serviceType: 'resource-group',
+              displayName: envRgName,
+              category: 'management',
+              status: 'proposed',
+              properties: { width: 600, height: 400 },
+              groupType: 'resource-group',
+              subtitle: `${env.toUpperCase()} Environment`,
+            },
           });
+
+          // Assign all services in this environment to the env RG
+          serviceNodes
+            .filter(n => n.data.displayName.toLowerCase().includes(env.toLowerCase()))
+            .forEach(svc => {
+              if (!svc.parentId) {
+                svc.parentId = envRgId;
+                parentAssignments.push({ nodeId: svc.id, groupId: envRgId });
+              }
+            });
         }
+
+        // Create user-defined groups for this environment
+        groupList.forEach((g) => {
+          if (!VALID_GROUP_TYPES.includes(g.groupType as GroupType)) return;
+
+          const groupId = generateId();
+          const displayName = withEnvSuffix(g.name, env);
+          groupNodes.push({
+            id: groupId,
+            type: 'group',
+            position: { x: 0, y: 0 }, // placeholder
+            data: {
+              serviceType: 'resource-group',
+              displayName,
+              category: 'networking',
+              status: 'proposed',
+              properties: { width: 400, height: 200 },
+              groupType: g.groupType as GroupType,
+              subtitle: g.subtitle,
+            },
+          });
+
+          // Map member services to this group (fuzzy match with env suffix)
+          if (g.serviceNames) {
+            const names = g.serviceNames.split(',').map(s => s.trim()).filter(Boolean);
+            names.forEach(name => {
+              const nameWithEnv = withEnvSuffix(name, env);
+              const nodeId = findNodeIdByName(nameWithEnv, nameToId);
+              if (nodeId) {
+                // Set parentId on the in-memory service node
+                const svc = serviceNodes.find(n => n.id === nodeId);
+                if (svc) {
+                  svc.parentId = groupId;
+                }
+                parentAssignments.push({ nodeId, groupId });
+              }
+            });
+          }
+        });
       });
 
       // 4. Run auto-layout on the full set (returns snapped positions + group dims)
@@ -679,7 +739,18 @@ export function useCopilotActions({
           ? ` WAF Review: ${warningCount} warnings, no critical issues.`
           : ' WAF Review: All checks passed!';
 
-      return `Generated architecture: ${serviceNodes.length} services, ${edgeNodes.length} connections, ${groupNodes.length} groups. Est. cost: ${costStr}.${wafMsg}`;
+      // 8. Run flow validation
+      const flowResult = runFlowValidation([...groupNodes, ...serviceNodes], edgeNodes);
+      const flowCritical = flowResult.findings.filter(f => f.severity === 'critical').length;
+      const flowWarning = flowResult.findings.filter(f => f.severity === 'warning').length;
+      const flowMsg = flowCritical > 0
+        ? ` Flow Validation: ${flowCritical} critical issues, ${flowWarning} warnings. Score: ${flowResult.score}/100.`
+        : flowWarning > 0
+          ? ` Flow Validation: ${flowWarning} warnings. Score: ${flowResult.score}/100.`
+          : ` Flow Validation: Passed! Score: ${flowResult.score}/100.`;
+
+      const envMsg = isMultiEnv ? ` across ${envList.length} environments (${envList.join(', ')})` : '';
+      return `Generated architecture${envMsg}: ${serviceNodes.length} services, ${edgeNodes.length} connections, ${groupNodes.length} groups. Est. cost: ${costStr}.${wafMsg}${flowMsg}`;
     },
   });
 

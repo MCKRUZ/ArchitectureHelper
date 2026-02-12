@@ -6,6 +6,7 @@ import type { DiagramState, AzureNode, AzureEdge, GroupType, ArchReviewFinding, 
 import { createInitialState } from './types';
 import { COST_ESTIMATES } from '@/lib/waf/costEstimates';
 import type { AzureServiceType } from './types';
+import { calculateAutoLayout } from '@/lib/layout/autoLayout';
 
 interface DiagramProviderProps {
   children: ReactNode;
@@ -445,6 +446,107 @@ export function DiagramProvider({ children }: DiagramProviderProps) {
       costSummary: { monthly, byService, byResourceGroup },
     }));
   }, [state.nodes, state.version]);
+
+  // Reactive layout on view mode change: re-layout when switching between 2D and isometric
+  const prevViewModeRef = useRef(state.viewMode);
+  const isRelayoutingRef = useRef(false);
+  useEffect(() => {
+    const currentViewMode = state.viewMode;
+    const prevViewMode = prevViewModeRef.current;
+
+    // Only trigger if viewMode actually changed and we're not already re-layouting
+    if (currentViewMode === prevViewMode || isRelayoutingRef.current) return;
+
+    // Skip re-layout on initial mount (no nodes yet)
+    if (state.nodes.length === 0) {
+      prevViewModeRef.current = currentViewMode;
+      return;
+    }
+
+    prevViewModeRef.current = currentViewMode;
+
+    // Trigger re-layout asynchronously
+    isRelayoutingRef.current = true;
+    (async () => {
+      try {
+        console.log(`[DiagramProvider] View mode changed to ${currentViewMode}, triggering re-layout...`);
+        const layoutResult = await calculateAutoLayout(
+          state.nodes,
+          state.edges,
+          'LR', // Default direction
+          currentViewMode
+        );
+
+        // Build position updates and node updates from layout result
+        const positionUpdates: Array<{ id: string; position: { x: number; y: number } }> = [];
+        layoutResult.positions.forEach((position, id) => {
+          positionUpdates.push({ id, position });
+        });
+
+        const nodeUpdates: Array<{ id: string; updates: Partial<AzureNode> }> = [];
+        layoutResult.groupDimensions.forEach((dims, id) => {
+          const node = state.nodes.find(n => n.id === id);
+          if (node) {
+            nodeUpdates.push({
+              id,
+              updates: {
+                data: {
+                  ...node.data,
+                  properties: { ...node.data.properties, width: dims.width, height: dims.height },
+                },
+              },
+            });
+          }
+        });
+
+        // Apply updates via batchUpdate
+        setStateInternal((prev) => {
+          let s = prev;
+
+          // Apply position updates
+          if (positionUpdates.length > 0) {
+            const posMap = new Map(positionUpdates.map((u) => [u.id, u.position]));
+            s = {
+              ...s,
+              nodes: s.nodes.map((n) => {
+                const pos = posMap.get(n.id);
+                return pos ? { ...n, position: pos } : n;
+              }),
+            };
+          }
+
+          // Apply node updates (group dimensions)
+          if (nodeUpdates.length > 0) {
+            const updateMap = new Map(nodeUpdates.map((u) => [u.id, u.updates]));
+            s = {
+              ...s,
+              nodes: s.nodes.map((n) => {
+                const upd = updateMap.get(n.id);
+                if (!upd) return n;
+                return {
+                  ...n,
+                  ...upd,
+                  data: upd.data ? { ...n.data, ...upd.data } : n.data,
+                };
+              }),
+            };
+          }
+
+          return {
+            ...s,
+            lastModified: new Date().toISOString(),
+            version: s.version + 1,
+          };
+        });
+
+        console.log(`[DiagramProvider] Re-layout complete for ${currentViewMode} mode`);
+      } catch (error) {
+        console.error('[DiagramProvider] Re-layout failed:', error);
+      } finally {
+        isRelayoutingRef.current = false;
+      }
+    })();
+  }, [state.viewMode, state.nodes.length, state.nodes, state.edges]);
 
   const value: DiagramContextValue = useMemo(
     () => ({

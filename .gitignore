@@ -32,6 +32,15 @@ yarn-error.log*
 
 # Claude Code (personal)
 CLAUDE.local.md
+.claude/settings.local.json
+
+# Testing
+test-results/
+.screenshots/
+fixtures/
+capture-*.mjs
+capture.ps1
+run-visual-test.ps1
 
 # Misc
 *.tsbuildinfo

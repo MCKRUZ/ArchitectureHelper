@@ -96,12 +96,12 @@ export function Toolbar() {
         <div className="flex items-center gap-2">
           {/* Cost summary — clickable to open breakdown */}
           <CostSummaryBadge
-            totalCost={state.costSummary.monthly}
+            totalCost={state.costSummary?.monthly ?? 0}
             onClick={() => setShowCostBreakdown(true)}
           />
 
           {/* WAF badge — always visible */}
-          <ValidationBadge results={state.validationResults} />
+          <ValidationBadge results={state.validationResults ?? []} />
 
           {/* Action buttons */}
           <ToolbarButton onClick={handleImport} title="Import diagram">
