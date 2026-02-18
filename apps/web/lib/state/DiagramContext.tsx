@@ -1,7 +1,7 @@
 'use client';
 
 import { createContext } from 'react';
-import type { DiagramState, AzureNode, AzureEdge, GroupType, ArchReviewFinding, CostSummary } from './types';
+import type { DiagramState, AzureNode, AzureEdge, GroupType, ArchReviewFinding, CostSummary, ConnectionType } from './types';
 
 export interface DiagramContextValue {
   state: DiagramState;
@@ -13,6 +13,7 @@ export interface DiagramContextValue {
   updateNode: (nodeId: string, updates: Partial<AzureNode>) => void;
   addEdge: (edge: AzureEdge) => void;
   removeEdge: (edgeId: string) => void;
+  updateEdge: (edgeId: string, updates: Partial<AzureEdge>) => void;
   selectNode: (nodeId: string | null) => void;
   selectEdge: (edgeId: string | null) => void;
   updateNodesPositions: (updates: Array<{ id: string; position: { x: number; y: number } }>) => void;

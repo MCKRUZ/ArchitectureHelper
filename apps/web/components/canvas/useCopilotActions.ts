@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef } from 'react';
+import { useRef, useMemo } from 'react';
 import { useCopilotAction, useCopilotReadable } from '@copilotkit/react-core';
 import { generateId } from '@/lib/utils';
 import { calculateTierBasedPosition, calculateAutoLayout } from '@/lib/layout/autoLayout';
@@ -10,6 +10,7 @@ import type { AzureServiceType, AzureServiceCategory, DiagramState, AzureNode, A
 import { runWafReview } from '@/lib/waf/wafReview';
 import { getDefaultPricingConfig, calculateServiceCost, deriveSku } from '@/lib/pricing/calculateCost';
 import { runFlowValidation } from '@/lib/validation/flowValidation';
+import { validateAndFixArchitecture, getValidationReport } from '@/lib/validators/architectureValidator';
 
 // Map service types to categories
 const SERVICE_CATEGORIES: Record<AzureServiceType, AzureServiceCategory> = {
@@ -158,38 +159,41 @@ export function useCopilotActions({
   setValidationResultsRef.current = setValidationResults;
   setCostSummaryRef.current = setCostSummary;
 
+  // Memoize the copilot readable value to prevent infinite re-renders
+  const copilotReadableValue = useMemo(() => ({
+    nodes: state.nodes.map(n => ({
+      id: n.id,
+      type: n.type,
+      serviceType: n.data.serviceType,
+      displayName: n.data.displayName,
+      category: n.data.category,
+      position: n.position,
+      parentId: n.parentId,
+      groupType: n.data.groupType,
+    })),
+    edges: state.edges.map(e => ({
+      id: e.id,
+      source: e.source,
+      target: e.target,
+      connectionType: e.data?.connectionType,
+    })),
+    groups: state.nodes
+      .filter(n => n.type === 'group')
+      .map(n => ({
+        id: n.id,
+        displayName: n.data.displayName,
+        groupType: n.data.groupType,
+        childCount: state.nodes.filter(c => c.parentId === n.id).length,
+      })),
+    totalServices: state.nodes.filter(n => n.type !== 'group').length,
+    totalGroups: state.nodes.filter(n => n.type === 'group').length,
+    totalConnections: state.edges.length,
+  }), [state.nodes, state.edges]);
+
   // Make diagram state readable by the AI (including groups)
   useCopilotReadable({
     description: 'The current Azure architecture diagram state',
-    value: {
-      nodes: state.nodes.map(n => ({
-        id: n.id,
-        type: n.type,
-        serviceType: n.data.serviceType,
-        displayName: n.data.displayName,
-        category: n.data.category,
-        position: n.position,
-        parentId: n.parentId,
-        groupType: n.data.groupType,
-      })),
-      edges: state.edges.map(e => ({
-        id: e.id,
-        source: e.source,
-        target: e.target,
-        connectionType: e.data?.connectionType,
-      })),
-      groups: state.nodes
-        .filter(n => n.type === 'group')
-        .map(n => ({
-          id: n.id,
-          displayName: n.data.displayName,
-          groupType: n.data.groupType,
-          childCount: state.nodes.filter(c => c.parentId === n.id).length,
-        })),
-      totalServices: state.nodes.filter(n => n.type !== 'group').length,
-      totalGroups: state.nodes.filter(n => n.type === 'group').length,
-      totalConnections: state.edges.length,
-    },
+    value: copilotReadableValue,
   });
 
   // Action to add a service to the canvas with tier-based positioning
@@ -532,6 +536,13 @@ export function useCopilotActions({
       },
     ],
     handler: async ({ services, connections, groups, environments }) => {
+      console.log('[generateArchitecture] Handler called with:', {
+        serviceCount: services?.length,
+        connectionCount: connections?.length,
+        groupCount: groups?.length,
+        environments
+      });
+
       // --- Build everything in memory first, then commit atomically ---
 
       const serviceList = services as Array<{ serviceType: string; displayName: string; description?: string }>;
@@ -593,11 +604,17 @@ export function useCopilotActions({
           const targetName = withEnvSuffix(conn.target, env);
           const sourceId = findNodeIdByName(sourceName, nameToId);
           const targetId = findNodeIdByName(targetName, nameToId);
-          if (!sourceId || !targetId) return;
+
+          if (!sourceId || !targetId) {
+            console.warn(`[generateArchitecture] Edge skipped: ${sourceName} -> ${targetName} (source=${sourceId}, target=${targetId})`);
+            return;
+          }
 
           const connType = validConnTypes.includes(conn.connectionType ?? '')
             ? conn.connectionType as 'public'
             : 'public';
+
+          console.log(`[generateArchitecture] Creating edge: ${sourceName} (${sourceId}) -> ${targetName} (${targetId})`);
 
           edgeNodes.push({
             id: `e-${sourceId}-${targetId}`,
@@ -633,12 +650,12 @@ export function useCopilotActions({
             },
           });
 
-          // Assign all services in this environment to the env RG
+          // Assign all services in this environment to the env RG (Dual Model Pattern)
           serviceNodes
             .filter(n => n.data.displayName.toLowerCase().includes(env.toLowerCase()))
             .forEach(svc => {
-              if (!svc.parentId) {
-                svc.parentId = envRgId;
+              if (!svc.data.logicalParent) {
+                svc.data.logicalParent = envRgId;
                 parentAssignments.push({ nodeId: svc.id, groupId: envRgId });
               }
             });
@@ -665,17 +682,17 @@ export function useCopilotActions({
             },
           });
 
-          // Map member services to this group (fuzzy match with env suffix)
+          // Map member services to this group (fuzzy match with env suffix) - Dual Model Pattern
           if (g.serviceNames) {
             const names = g.serviceNames.split(',').map(s => s.trim()).filter(Boolean);
             names.forEach(name => {
               const nameWithEnv = withEnvSuffix(name, env);
               const nodeId = findNodeIdByName(nameWithEnv, nameToId);
               if (nodeId) {
-                // Set parentId on the in-memory service node
+                // Set logicalParent on the in-memory service node
                 const svc = serviceNodes.find(n => n.id === nodeId);
                 if (svc) {
-                  svc.parentId = groupId;
+                  svc.data.logicalParent = groupId;
                 }
                 parentAssignments.push({ nodeId, groupId });
               }
@@ -709,24 +726,114 @@ export function useCopilotActions({
             properties: { ...node.data.properties, width: dims.width, height: dims.height },
           };
         }
-        // Apply group nesting (e.g., VNet inside RG)
+        // Apply group nesting (e.g., VNet inside RG) - Dual Model Pattern
         const nestParentId = layoutResult.groupNesting.get(node.id);
         if (nestParentId) {
-          node.parentId = nestParentId;
-          parentAssignments.push({ nodeId: node.id, groupId: nestParentId });
+          node.data.logicalParent = nestParentId;
+          // Don't build parentAssignments yet - validator may change them
         }
       });
 
-      // 6. Commit everything atomically via batchUpdate -- no setTimeout
-      batchUpdateRef.current({
-        addNodes: [...groupNodes, ...serviceNodes],
-        addEdges: edgeNodes,
-        parentAssignments,
-        positionUpdates: allNodes.map(n => ({ id: n.id, position: n.position })),
+      // 6. Validate and auto-fix architecture before committing
+      console.log('[generateArchitecture] BEFORE validation - service types:',
+        serviceNodes.map(s => ({ name: s.data.displayName, type: s.data.serviceType, parent: s.data.logicalParent }))
+      );
+
+      const validationResult = validateAndFixArchitecture([...groupNodes, ...serviceNodes]);
+
+      console.log('[generateArchitecture] AFTER validation - service types:',
+        validationResult.nodes.filter(n => n.type !== 'group').map(s => ({ name: s.data.displayName, type: s.data.serviceType, parent: s.data.logicalParent }))
+      );
+
+      console.log('[generateArchitecture] Validation:', getValidationReport(validationResult.result));
+
+      // Update nodes with fixed values
+      const fixedGroupNodes = validationResult.nodes.filter(n => n.type === 'group');
+      const fixedServiceNodes = validationResult.nodes.filter(n => n.type !== 'group');
+
+      // 6a. Re-run layout with correct nesting structure (after validation fixes)
+      console.log('[generateArchitecture] Re-running layout after validation fixes...');
+      const fixedLayoutResult = await calculateAutoLayout(
+        [...fixedGroupNodes, ...fixedServiceNodes],
+        edgeNodes,
+        'LR',
+        currentViewMode
+      );
+
+      // Build final nodes with corrected positions (IMMUTABLE - no mutation)
+      const finalNodes = [...fixedGroupNodes, ...fixedServiceNodes].map((node) => {
+        const pos = fixedLayoutResult.positions.get(node.id);
+        const dims = node.type === 'group' ? fixedLayoutResult.groupDimensions.get(node.id) : undefined;
+
+        let updatedNode = node;
+
+        if (pos) {
+          updatedNode = { ...updatedNode, position: pos };
+          console.log(`[generateArchitecture] Applied position to ${node.data.displayName}:`, pos);
+        }
+
+        if (dims && node.type === 'group') {
+          updatedNode = {
+            ...updatedNode,
+            data: {
+              ...updatedNode.data,
+              properties: { ...updatedNode.data.properties, width: dims.width, height: dims.height },
+            },
+          };
+        }
+
+        return updatedNode;
       });
 
-      // 7. Run WAF review and populate toolbar badges
-      const wafResult = runWafReview([...groupNodes, ...serviceNodes], edgeNodes);
+      // Split back into groups and services
+      const finalGroupNodes = finalNodes.filter(n => n.type === 'group') as AzureNode[];
+      const finalServiceNodes = finalNodes.filter(n => n.type !== 'group') as AzureNode[];
+
+      // Build parentAssignments from FIXED nodes (after validation)
+      const fixedParentAssignments: Array<{ nodeId: string; groupId: string }> = [];
+      finalNodes.forEach(node => {
+        if (node.data.logicalParent) {
+          fixedParentAssignments.push({ nodeId: node.id, groupId: node.data.logicalParent });
+        }
+      });
+
+      // Build position updates from the FINAL layout result
+      const finalPositionUpdates: Array<{ id: string; position: { x: number; y: number } }> = [];
+      fixedLayoutResult.positions.forEach((position, id) => {
+        finalPositionUpdates.push({ id, position });
+        console.log(`[generateArchitecture] Position update: ${id} -> (${position.x}, ${position.y})`);
+      });
+
+      // Validate edges - ensure all edges reference valid nodes
+      const finalNodeIds = new Set(finalNodes.map(n => n.id));
+      const validEdges = edgeNodes.filter(edge => {
+        const sourceExists = finalNodeIds.has(edge.source);
+        const targetExists = finalNodeIds.has(edge.target);
+
+        if (!sourceExists || !targetExists) {
+          console.warn(`[generateArchitecture] INVALID EDGE REMOVED: ${edge.id}`, {
+            source: edge.source,
+            sourceExists,
+            target: edge.target,
+            targetExists
+          });
+          return false;
+        }
+        return true;
+      });
+
+      console.log(`[generateArchitecture] Edge validation: ${validEdges.length}/${edgeNodes.length} edges valid`);
+
+      // 7. Commit everything atomically via batchUpdate -- no setTimeout
+      batchUpdateRef.current({
+        addNodes: [...finalGroupNodes, ...finalServiceNodes],
+        addEdges: validEdges, // Use validated edges only
+        parentAssignments: fixedParentAssignments,
+        positionUpdates: finalPositionUpdates,
+      });
+
+      // 8. Run WAF review and populate toolbar badges
+      const wafResult = runWafReview([...finalGroupNodes, ...finalServiceNodes], edgeNodes);
       setValidationResultsRef.current(wafResult.findings);
       setCostSummaryRef.current(wafResult.costSummary);
 
@@ -739,8 +846,8 @@ export function useCopilotActions({
           ? ` WAF Review: ${warningCount} warnings, no critical issues.`
           : ' WAF Review: All checks passed!';
 
-      // 8. Run flow validation
-      const flowResult = runFlowValidation([...groupNodes, ...serviceNodes], edgeNodes);
+      // 9. Run flow validation
+      const flowResult = runFlowValidation([...finalGroupNodes, ...finalServiceNodes], edgeNodes);
       const flowCritical = flowResult.findings.filter(f => f.severity === 'critical').length;
       const flowWarning = flowResult.findings.filter(f => f.severity === 'warning').length;
       const flowMsg = flowCritical > 0
@@ -749,8 +856,24 @@ export function useCopilotActions({
           ? ` Flow Validation: ${flowWarning} warnings. Score: ${flowResult.score}/100.`
           : ` Flow Validation: Passed! Score: ${flowResult.score}/100.`;
 
+      // 10. Build result message with validation info
+      const validationMsg = validationResult.result.fixes.length > 0
+        ? ` Auto-fixed ${validationResult.result.fixes.length} architecture issues.`
+        : '';
+
       const envMsg = isMultiEnv ? ` across ${envList.length} environments (${envList.join(', ')})` : '';
-      return `Generated architecture${envMsg}: ${serviceNodes.length} services, ${edgeNodes.length} connections, ${groupNodes.length} groups. Est. cost: ${costStr}.${wafMsg}${flowMsg}`;
+      const resultMsg = `Generated architecture${envMsg}: ${finalServiceNodes.length} services, ${edgeNodes.length} connections, ${finalGroupNodes.length} groups. Est. cost: ${costStr}.${validationMsg}${wafMsg}${flowMsg}`;
+
+      console.log('[generateArchitecture] Completed successfully:', {
+        serviceNodes: finalServiceNodes.length,
+        edgeNodes: edgeNodes.length,
+        groupNodes: finalGroupNodes.length,
+        validationFixes: validationResult.result.fixes.length,
+        positionUpdates: finalPositionUpdates.length,
+        resultMsg
+      });
+
+      return resultMsg;
     },
   });
 

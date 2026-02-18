@@ -1,13 +1,27 @@
+/**
+ * Main Application Page - Konva Canvas Implementation
+ * Uses absolute positioning with dynamic group overlays for professional Azure diagrams
+ */
+
 'use client';
 
 import dynamic from 'next/dynamic';
 import { ServicePalette } from '@/components/palette/ServicePalette';
 import { DiagramProvider } from '@/lib/state/DiagramProvider';
 
-// Dynamic imports to avoid SSR issues with CopilotKit
-const AzureCanvas = dynamic(() => import('@/components/canvas/AzureCanvas').then(mod => ({ default: mod.AzureCanvas })), { ssr: false });
-const PropertiesPanel = dynamic(() => import('@/components/properties/PropertiesPanel').then(mod => ({ default: mod.PropertiesPanel })), { ssr: false });
-const Toolbar = dynamic(() => import('@/components/toolbar/Toolbar').then(mod => ({ default: mod.Toolbar })), { ssr: false });
+// Dynamic imports to avoid SSR issues
+const KonvaCanvas = dynamic(
+  () => import('@/components/canvas/KonvaCanvas').then(mod => ({ default: mod.KonvaCanvas })),
+  { ssr: false }
+);
+const PropertiesPanel = dynamic(
+  () => import('@/components/properties/PropertiesPanel').then(mod => ({ default: mod.PropertiesPanel })),
+  { ssr: false }
+);
+const Toolbar = dynamic(
+  () => import('@/components/toolbar/Toolbar').then(mod => ({ default: mod.Toolbar })),
+  { ssr: false }
+);
 
 export default function Home() {
   return (
@@ -25,7 +39,7 @@ export default function Home() {
 
           {/* Canvas */}
           <div className="flex-1 relative">
-            <AzureCanvas />
+            <KonvaCanvas />
           </div>
         </div>
 

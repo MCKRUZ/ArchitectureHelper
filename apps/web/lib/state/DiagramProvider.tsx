@@ -12,6 +12,30 @@ interface DiagramProviderProps {
   children: ReactNode;
 }
 
+/**
+ * Migrate old parentId-based data to new Dual Model Pattern (logicalParent).
+ * Converts React Flow parent-child nesting to logical relationships.
+ */
+function migrateToDualModel(state: DiagramState): DiagramState {
+  return {
+    ...state,
+    nodes: state.nodes.map((node) => {
+      // If node has parentId, migrate to logicalParent
+      if (node.parentId) {
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            logicalParent: node.parentId,
+          },
+          parentId: undefined, // Clear React Flow parentId
+        };
+      }
+      return node;
+    }),
+  };
+}
+
 export function DiagramProvider({ children }: DiagramProviderProps) {
   const [state, setStateInternal] = useState<DiagramState>(createInitialState);
 
@@ -109,6 +133,25 @@ export function DiagramProvider({ children }: DiagramProviderProps) {
           ...s,
           edges: s.edges.filter((e) => e.id !== edgeId),
           selectedEdgeId: s.selectedEdgeId === edgeId ? null : s.selectedEdgeId,
+          lastModified: new Date().toISOString(),
+          version: s.version + 1,
+        };
+      });
+    },
+    [setState]
+  );
+
+  const updateEdge = useCallback(
+    (edgeId: string, updates: Partial<AzureEdge>) => {
+      setState((prev) => {
+        const s = getState(prev);
+        return {
+          ...s,
+          edges: s.edges.map((e) =>
+            e.id === edgeId
+              ? { ...e, ...updates, data: updates.data ? { ...e.data, ...updates.data } : e.data }
+              : e
+          ),
           lastModified: new Date().toISOString(),
           version: s.version + 1,
         };
@@ -263,16 +306,16 @@ export function DiagramProvider({ children }: DiagramProviderProps) {
         const group = s.nodes.find((n) => n.id === groupId);
         if (!node || !group) return s;
 
-        const relativePosition = {
-          x: node.position.x - group.position.x,
-          y: node.position.y - group.position.y,
-        };
-
+        // Dual Model Pattern: Set logicalParent, keep absolute positioning
         return {
           ...s,
           nodes: s.nodes.map((n) =>
             n.id === nodeId
-              ? { ...n, parentId: groupId, position: relativePosition }
+              ? {
+                  ...n,
+                  data: { ...n.data, logicalParent: groupId },
+                  parentId: undefined, // No React Flow nesting
+                }
               : n
           ),
           lastModified: new Date().toISOString(),
@@ -288,18 +331,18 @@ export function DiagramProvider({ children }: DiagramProviderProps) {
       setState((prev) => {
         const s = getState(prev);
         const node = s.nodes.find((n) => n.id === nodeId);
-        if (!node || !node.parentId) return s;
+        if (!node || !node.data.logicalParent) return s;
 
-        const group = s.nodes.find((n) => n.id === node.parentId);
-        const absolutePosition = group
-          ? { x: node.position.x + group.position.x, y: node.position.y + group.position.y }
-          : node.position;
-
+        // Dual Model Pattern: Clear logicalParent, keep absolute positioning
         return {
           ...s,
           nodes: s.nodes.map((n) =>
             n.id === nodeId
-              ? { ...n, parentId: undefined, position: absolutePosition }
+              ? {
+                  ...n,
+                  data: { ...n.data, logicalParent: undefined },
+                  parentId: undefined,
+                }
               : n
           ),
           lastModified: new Date().toISOString(),
@@ -331,6 +374,7 @@ export function DiagramProvider({ children }: DiagramProviderProps) {
           s = { ...s, edges: [...s.edges, ...ops.addEdges] };
         }
 
+        // Dual Model Pattern: Set BOTH logicalParent AND parentId for visual nesting
         if (ops.parentAssignments && ops.parentAssignments.length > 0) {
           const assignMap = new Map(
             ops.parentAssignments.map((a) => [a.nodeId, a.groupId])
@@ -339,7 +383,9 @@ export function DiagramProvider({ children }: DiagramProviderProps) {
             ...s,
             nodes: s.nodes.map((n) => {
               const groupId = assignMap.get(n.id);
-              return groupId ? { ...n, parentId: groupId } : n;
+              return groupId
+                ? { ...n, data: { ...n.data, logicalParent: groupId }, parentId: groupId }
+                : n;
             }),
           };
         }
@@ -352,7 +398,13 @@ export function DiagramProvider({ children }: DiagramProviderProps) {
             ...s,
             nodes: s.nodes.map((n) => {
               const pos = posMap.get(n.id);
-              return pos ? { ...n, position: pos } : n;
+              if (!pos) return n;
+
+              // Dual Model Pattern: Always use ABSOLUTE positions
+              // logicalParent handles business logic, positions are always absolute
+              // Konva renders everything at root level with absolute coordinates
+              console.log(`[batchUpdate] Applying absolute position to ${n.data.displayName}:`, pos);
+              return { ...n, position: pos };
             }),
           };
         }
@@ -392,19 +444,17 @@ export function DiagramProvider({ children }: DiagramProviderProps) {
         const group = s.nodes.find((n) => n.id === groupId);
         if (!group) return s;
 
+        // Dual Model Pattern: Clear logicalParent for children, keep absolute positions
         return {
           ...s,
           nodes: s.nodes
             .filter((n) => n.id !== groupId)
             .map((n) =>
-              n.parentId === groupId
+              n.data.logicalParent === groupId
                 ? {
                     ...n,
+                    data: { ...n.data, logicalParent: undefined },
                     parentId: undefined,
-                    position: {
-                      x: n.position.x + group.position.x,
-                      y: n.position.y + group.position.y,
-                    },
                   }
                 : n
             ),
@@ -440,11 +490,11 @@ export function DiagramProvider({ children }: DiagramProviderProps) {
       const svcKey = n.data.serviceType;
       byService[svcKey] = (byService[svcKey] ?? 0) + cost;
 
-      // Aggregate by parent resource group
-      const parentId = n.parentId;
-      if (parentId) {
-        const parent = state.nodes.find(p => p.id === parentId);
-        const rgName = parent?.data.displayName ?? parentId;
+      // Aggregate by logical parent resource group (Dual Model Pattern)
+      const logicalParent = n.data.logicalParent;
+      if (logicalParent) {
+        const parent = state.nodes.find(p => p.id === logicalParent);
+        const rgName = parent?.data.displayName ?? logicalParent;
         byResourceGroup[rgName] = (byResourceGroup[rgName] ?? 0) + cost;
       } else {
         byResourceGroup['Unassigned'] = (byResourceGroup['Unassigned'] ?? 0) + cost;
@@ -487,7 +537,8 @@ export function DiagramProvider({ children }: DiagramProviderProps) {
           currentViewMode
         );
 
-        // Build position updates, dimension updates, and parentId updates from layout result
+        // Build position updates and dimension updates from layout result
+        // Note: Dual Model Pattern uses absolute positioning, no parentId updates
         const positionUpdates: Array<{ id: string; position: { x: number; y: number } }> = [];
         layoutResult.positions.forEach((position, id) => {
           positionUpdates.push({ id, position });
@@ -509,13 +560,7 @@ export function DiagramProvider({ children }: DiagramProviderProps) {
           }
         });
 
-        // Apply parentId updates from groupNesting map
-        const parentIdUpdates: Array<{ id: string; parentId: string }> = [];
-        layoutResult.groupNesting.forEach((parentId, nodeId) => {
-          parentIdUpdates.push({ id: nodeId, parentId });
-        });
-
-        // Apply updates via batchUpdate
+        // Apply updates
         setStateInternal((prev) => {
           let s = prev;
 
@@ -548,18 +593,6 @@ export function DiagramProvider({ children }: DiagramProviderProps) {
             };
           }
 
-          // Apply parentId updates from groupNesting
-          if (parentIdUpdates.length > 0) {
-            const parentMap = new Map(parentIdUpdates.map((u) => [u.id, u.parentId]));
-            s = {
-              ...s,
-              nodes: s.nodes.map((n) => {
-                const newParentId = parentMap.get(n.id);
-                return newParentId ? { ...n, parentId: newParentId } : n;
-              }),
-            };
-          }
-
           return {
             ...s,
             lastModified: new Date().toISOString(),
@@ -585,9 +618,11 @@ export function DiagramProvider({ children }: DiagramProviderProps) {
       const stored = localStorage.getItem('azurecraft-diagram');
       if (stored) {
         const data = JSON.parse(stored) as DiagramState;
-        setStateInternal(data);
+        // Migrate old parentId-based data to Dual Model Pattern
+        const migrated = migrateToDualModel(data);
+        setStateInternal(migrated);
         hasLoadedFromStorage.current = true;
-        console.log('[DiagramProvider] Loaded diagram from localStorage - preserving existing positions');
+        console.log('[DiagramProvider] Loaded diagram from localStorage and migrated to Dual Model Pattern');
       }
     } catch (error) {
       console.error('[DiagramProvider] Failed to load from localStorage:', error);
@@ -619,6 +654,7 @@ export function DiagramProvider({ children }: DiagramProviderProps) {
       updateNode,
       addEdge,
       removeEdge,
+      updateEdge,
       selectNode,
       selectEdge,
       updateNodesPositions,
@@ -642,6 +678,7 @@ export function DiagramProvider({ children }: DiagramProviderProps) {
       updateNode,
       addEdge,
       removeEdge,
+      updateEdge,
       selectNode,
       selectEdge,
       updateNodesPositions,

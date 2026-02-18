@@ -79,6 +79,12 @@ export interface AzureNodeData extends Record<string, unknown> {
   category: AzureServiceCategory;
   groupType?: GroupType;
   subtitle?: string;
+  /**
+   * Logical parent ID for business logic relationships (WAF, cost rollup, compliance).
+   * Separate from React Flow's parentId to allow flexible visual positioning.
+   * Example: VM in Subnet → logicalParent = subnet node ID
+   */
+  logicalParent?: string;
 }
 
 // Azure node (extends React Flow node)

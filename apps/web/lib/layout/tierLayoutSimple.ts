@@ -1,10 +1,12 @@
 /**
- * SIMPLE Tier-Based Layout - Rewrite from scratch
+ * Tier-Based Layout with Dual Model Pattern
  *
- * Goals:
- * 1. Make it WORK first
- * 2. Clean, predictable, easy to debug
- * 3. No over-engineering
+ * Uses ABSOLUTE positioning for all nodes (no React Flow parent-child nesting).
+ * Logical relationships stored in node.data.logicalParent for business logic.
+ * Visual grouping rendered via GroupBackgrounds component (SVG overlays).
+ *
+ * NEW APPROACH: Position groups FIRST, then services INSIDE groups.
+ * This ensures proper hierarchy: RG > VNet > Subnets > Services
  */
 
 import type { AzureNode, AzureEdge, AzureServiceCategory } from '@/lib/state/types';
@@ -16,284 +18,256 @@ type ViewMode = '2d' | 'isometric' | 'cost-heatmap' | 'compliance';
 export interface LayoutResult {
   positions: Map<string, { x: number; y: number }>;
   groupDimensions: Map<string, { width: number; height: number }>;
-  groupNesting: Map<string, string>; // nodeId -> parentId
+  groupNesting: Map<string, string>; // DEPRECATED - kept for backward compat, always empty
 }
 
-// Tier X positions (left to right)
-const TIER_X: Record<AzureServiceCategory, number> = {
-  'security': 150,
-  'identity': 150,
-  'networking': 350,
-  'compute': 650,
-  'containers': 650,
-  'web': 650,
-  'integration': 950,
-  'messaging': 950,
-  'databases': 1250,
-  'storage': 1250,
-  'ai-ml': 1550,
-  'analytics': 1550,
-  'management': 50,
-  'devops': 50,
-};
-
-const NODE_SPACING = 160;
+// CRITICAL: These must match the actual rendered dimensions in KonvaCanvas.tsx!
+const NODE_SPACING = 20; // Vertical spacing between nodes
+const NODE_W_2D = 280; // Matches KonvaCanvas NODE_W
+const NODE_H_2D = 72;  // Matches KonvaCanvas NODE_H
+const NODE_W_ISO = 75;
+const NODE_H_ISO = 90;
 const GROUP_PADDING = 60;
-const GROUP_HEADER = 60;
-const TIER_START_Y = 100;
+const GROUP_HEADER_HEIGHT = 60;
+const SUBNET_SPACING = 80; // Increased horizontal spacing between subnets
 
 /**
- * Simple tier-based layout
+ * Hierarchy-First Layout Algorithm
+ *
+ * 1. Build logical tree (RG → VNet → Subnets → Services)
+ * 2. Position services inside their parent subnet (stack vertically)
+ * 3. Position subnets side-by-side
+ * 4. Position VNet to wrap subnets
+ * 5. Position RG to wrap VNet + global services
  */
 export async function calculateTierLayoutSimple(
   nodes: AzureNode[],
   edges: AzureEdge[],
   viewMode: ViewMode
 ): Promise<LayoutResult> {
-  console.log(`[tierLayoutSimple] Starting simple layout: ${nodes.length} nodes, viewMode=${viewMode}`);
+  console.log(`[tierLayout] Starting hierarchy-first layout: ${nodes.length} nodes, viewMode=${viewMode}`);
 
   const positions = new Map<string, { x: number; y: number }>();
   const groupDimensions = new Map<string, { width: number; height: number }>();
-  const groupNesting = new Map<string, string>();
 
   const isIso = viewMode === 'isometric';
-  const nodeW = isIso ? 75 : 180;
-  const nodeH = isIso ? 90 : 56;
+  const nodeW = isIso ? NODE_W_ISO : NODE_W_2D;
+  const nodeH = isIso ? NODE_H_ISO : NODE_H_2D;
 
   // Separate groups and services
   const groups = nodes.filter(n => n.type === 'group');
   const services = nodes.filter(n => n.type !== 'group');
 
-  // Step 0: Build group nesting map from EXISTING parentIds (preserve user's structure!)
-  const GROUP_TYPE_RANK: Record<string, number> = {
-    'resource-group': 0,
-    'virtual-network': 1,
-    'subnet': 2,
-  };
-
-  // First, preserve any existing group parentIds from the original nodes
-  groups.forEach(group => {
-    if (group.parentId) {
-      groupNesting.set(group.id, group.parentId);
-      console.log(`[tierLayoutSimple] Preserved group nesting: "${group.data.displayName}" -> parent ID ${group.parentId}`);
-    }
-  });
-
-  // Also track service parentIds
-  services.forEach(service => {
-    if (service.parentId) {
-      groupNesting.set(service.id, service.parentId);
-    }
-  });
-
-  // Step 1: Layout services INSIDE groups (relative positions)
-  const servicesByGroup = new Map<string, AzureNode[]>();
-
-  services.forEach(service => {
-    if (service.parentId) {
-      if (!servicesByGroup.has(service.parentId)) {
-        servicesByGroup.set(service.parentId, []);
-      }
-      servicesByGroup.get(service.parentId)!.push(service);
-
-      // Track parentId assignment
-      groupNesting.set(service.id, service.parentId);
-    }
-  });
-
-  // Layout grouped services in 2-column grid
-  // IMPORTANT: Child positions are RELATIVE to parent, never snap in isometric!
-  servicesByGroup.forEach((groupServices, groupId) => {
-    let x = GROUP_PADDING;
-    let y = GROUP_HEADER;
-    let row = 0;
-
-    groupServices.forEach((service, index) => {
-      const col = index % 2; // 2 columns
-
-      if (col === 0 && index > 0) {
-        // New row
-        row++;
-        x = GROUP_PADDING;
-        y = GROUP_HEADER + (row * (nodeH + 40));
-      }
-
-      // Children use RELATIVE positions - NO snapping in isometric!
-      positions.set(service.id, { x, y });
-
-      if (col === 0) {
-        x += nodeW + 40;
-      }
-    });
-  });
-
-  // Step 2: Calculate group dimensions bottom-up (subnets first, then vnets, then rgs)
-  // This ensures parent dimensions include their nested children
-  const groupsByRankForDims = [...groups].sort((a, b) => {
-    const aRank = GROUP_TYPE_RANK[a.data.groupType ?? 'resource-group'] ?? 0;
-    const bRank = GROUP_TYPE_RANK[b.data.groupType ?? 'resource-group'] ?? 0;
-    return bRank - aRank; // Process subnets first
-  });
-
-  for (const group of groupsByRankForDims) {
-    // Get direct service children
-    const serviceChildren = servicesByGroup.get(group.id) || [];
-
-    // Get nested group children
-    const nestedGroupChildren = groups.filter(g => groupNesting.get(g.id) === group.id);
-
-    // All children (services + nested groups)
-    const allChildren = [...serviceChildren, ...nestedGroupChildren];
-
-    if (allChildren.length === 0) {
-      // Empty group
-      const dims = isIso
-        ? snapGroupDimensions(400)
-        : { width: 400, height: 250 };
-      groupDimensions.set(group.id, dims);
-    } else {
-      // Calculate dimensions to fit all children in 2-column grid
-      const cols = 2;
-      const rows = Math.ceil(allChildren.length / cols);
-
-      // Calculate width needed for children
-      let maxChildWidth = 0;
-      allChildren.forEach(child => {
-        if (child.type === 'group') {
-          const childDims = groupDimensions.get(child.id);
-          if (childDims) maxChildWidth = Math.max(maxChildWidth, childDims.width);
-        } else {
-          maxChildWidth = Math.max(maxChildWidth, nodeW);
-        }
-      });
-
-      // Add extra width for ungrouped services column if this is a Resource Group
-      const leftColumnWidth = group.data.groupType === 'resource-group' ? 250 : 0;
-      const width = Math.max(400, GROUP_PADDING * 2 + leftColumnWidth + cols * maxChildWidth + (cols - 1) * 40);
-
-      // Calculate height
-      let maxChildHeight = 0;
-      allChildren.forEach(child => {
-        if (child.type === 'group') {
-          const childDims = groupDimensions.get(child.id);
-          if (childDims) maxChildHeight = Math.max(maxChildHeight, childDims.height);
-        } else {
-          maxChildHeight = Math.max(maxChildHeight, nodeH);
-        }
-      });
-
-      // Also account for ungrouped services height if this is a Resource Group
-      const ungroupedServicesInGroup = services.filter(s => s.parentId === group.id);
-      const ungroupedHeight = ungroupedServicesInGroup.length > 0
-        ? GROUP_HEADER + ungroupedServicesInGroup.length * (nodeH + 20)
-        : 0;
-
-      const childrenHeight = GROUP_HEADER + rows * maxChildHeight + (rows - 1) * 40 + GROUP_PADDING;
-      const height = Math.max(childrenHeight, ungroupedHeight + GROUP_PADDING);
-
-      const dims = isIso
-        ? snapGroupDimensions(width)
-        : snapCartesianGroupDimensions(width, height);
-
-      groupDimensions.set(group.id, dims);
-    }
-  }
-
-  // Step 3: Position groups WITHOUT OVERLAP
-  // Process groups bottom-up (subnets -> vnets -> rgs) to calculate dimensions first
-  const groupsByNestingLevel = [...groups].sort((a, b) => {
-    const aRank = GROUP_TYPE_RANK[a.data.groupType ?? 'resource-group'] ?? 0;
-    const bRank = GROUP_TYPE_RANK[b.data.groupType ?? 'resource-group'] ?? 0;
-    return bRank - aRank; // Process subnets first, then vnets, then RGs
-  });
-
-  // Position nested groups (subnets, vnets) INSIDE their parents in a grid
-  const childGroupsByParent = new Map<string, AzureNode[]>();
-
-  for (const group of groups) {
-    const parentId = groupNesting.get(group.id);
+  // Build logical tree
+  const logicalChildren = new Map<string, AzureNode[]>();
+  nodes.forEach(node => {
+    const parentId = node.data.logicalParent;
     if (parentId) {
-      if (!childGroupsByParent.has(parentId)) {
-        childGroupsByParent.set(parentId, []);
+      if (!logicalChildren.has(parentId)) {
+        logicalChildren.set(parentId, []);
       }
-      childGroupsByParent.get(parentId)!.push(group);
+      logicalChildren.get(parentId)!.push(node);
     }
+  });
+
+  // Find top-level nodes (no logical parent)
+  const topLevelNodes = nodes.filter(n => !n.data.logicalParent);
+
+  // Find the Resource Group (should be top-level)
+  const resourceGroup = groups.find(g => g.data.groupType === 'resource-group');
+
+  // Find the VNet (logical parent = RG)
+  const vnet = groups.find(g => g.data.groupType === 'virtual-network');
+
+  // Find subnets (logical parent = VNet)
+  const subnets = groups.filter(g => g.data.groupType === 'subnet');
+
+  console.log(`[tierLayout] Found: RG=${!!resourceGroup}, VNet=${!!vnet}, Subnets=${subnets.length}`);
+
+  // STEP 1: Position global services in LEFT column (inside RG, outside VNet)
+  // Left-to-right pattern: Global Services → VNet (App Subnet | Data Subnet)
+  const globalServices = services.filter(s => s.data.logicalParent === resourceGroup?.id);
+  console.log(`[tierLayout] Found ${globalServices.length} global services (RG level)`);
+
+  const GLOBAL_COL_SPACING = GROUP_PADDING; // Gap between global col and VNet
+  const globalColWidth = globalServices.length > 0 ? nodeW + GROUP_PADDING : 0;
+  const globalX = GROUP_PADDING; // Left edge inside RG padding
+  const globalStartY = GROUP_HEADER_HEIGHT + GROUP_PADDING; // Below RG header
+
+  globalServices.forEach((service, index) => {
+    const x = globalX;
+    const y = globalStartY + index * (nodeH + NODE_SPACING);
+    const pos = isIso ? snapToIsoGrid(x, y) : snapToCartesianGrid(x, y);
+    positions.set(service.id, pos);
+    console.log(`[tierLayout] Global service "${service.data.displayName}" at (${pos.x}, ${pos.y})`);
+  });
+
+  // STEP 2: Define VNet position — shifted RIGHT by global services column
+  const VNET_X = GROUP_PADDING + globalColWidth + (globalServices.length > 0 ? GLOBAL_COL_SPACING : 0);
+  const VNET_Y = GROUP_HEADER_HEIGHT; // Leave room for RG header
+
+  // STEP 3: Position subnets inside VNet (with padding for VNet header)
+  const SUBNET_Y = VNET_Y + GROUP_HEADER_HEIGHT; // Leave room for VNet header
+  let currentSubnetX = VNET_X + GROUP_PADDING;   // Leave room for VNet left padding
+
+  subnets.forEach((subnet) => {
+    const subnetServices = logicalChildren.get(subnet.id) || [];
+    console.log(`[tierLayout] Subnet "${subnet.data.displayName}" has ${subnetServices.length} services`);
+
+    // Position services vertically inside subnet
+    subnetServices.forEach((service, index) => {
+      const x = currentSubnetX + GROUP_PADDING;
+      const y = SUBNET_Y + GROUP_HEADER_HEIGHT + index * (nodeH + NODE_SPACING);
+      const pos = isIso ? snapToIsoGrid(x, y) : snapToCartesianGrid(x, y);
+      positions.set(service.id, pos);
+      console.log(`[tierLayout]   Service "${service.data.displayName}" at (${pos.x}, ${pos.y}) inside ${subnet.data.displayName}`);
+    });
+
+    // Calculate subnet dimensions
+    const subnetWidth = nodeW + GROUP_PADDING * 2;
+    const subnetHeight = Math.max(
+      250,
+      GROUP_HEADER_HEIGHT + subnetServices.length * (nodeH + NODE_SPACING) + GROUP_PADDING
+    );
+
+    const dims = isIso
+      ? snapGroupDimensions(subnetWidth)
+      : snapCartesianGroupDimensions(subnetWidth, subnetHeight);
+
+    groupDimensions.set(subnet.id, dims);
+
+    const subnetPos = isIso
+      ? snapToIsoGrid(currentSubnetX, SUBNET_Y)
+      : { x: currentSubnetX, y: SUBNET_Y };
+    positions.set(subnet.id, subnetPos);
+
+    console.log(`[tierLayout] Subnet "${subnet.data.displayName}" at (${subnetPos.x}, ${subnetPos.y}), size ${dims.width}x${dims.height}`);
+
+    currentSubnetX += dims.width + SUBNET_SPACING;
+  });
+
+  // STEP 4: Position VNet to wrap subnets
+  let vnetWidth = 0;
+  let vnetHeight = 0;
+
+  if (vnet && subnets.length > 0) {
+    vnetWidth = currentSubnetX - (VNET_X + GROUP_PADDING) + GROUP_PADDING * 2;
+    vnetHeight = Math.max(
+      ...subnets.map(s => (groupDimensions.get(s.id)?.height || 250))
+    ) + GROUP_PADDING + GROUP_HEADER_HEIGHT;
+
+    const dims = isIso
+      ? snapGroupDimensions(vnetWidth)
+      : snapCartesianGroupDimensions(vnetWidth, vnetHeight);
+
+    groupDimensions.set(vnet.id, dims);
+    vnetWidth = dims.width;
+    vnetHeight = dims.height;
+
+    positions.set(vnet.id, { x: VNET_X, y: VNET_Y });
+    console.log(`[tierLayout] VNet "${vnet.data.displayName}" at (${VNET_X}, ${VNET_Y}), size ${vnetWidth}x${vnetHeight}`);
   }
 
-  childGroupsByParent.forEach((childGroups, parentId) => {
-    // Find parent node to check if it has ungrouped service siblings
-    const parentNode = groups.find(g => g.id === parentId);
-    const parentGroupType = parentNode?.data.groupType;
+  // STEP 5: Position RG to wrap global services + VNet side by side
+  if (resourceGroup) {
+    const globalColHeight = globalServices.length > 0
+      ? globalStartY + globalServices.length * (nodeH + NODE_SPACING) + GROUP_PADDING
+      : 0;
 
-    // If parent is a Resource Group, offset nested groups to the right to leave room for ungrouped services
-    const leftColumnWidth = parentGroupType === 'resource-group' ? 250 : 0;
+    const rgWidth = VNET_X + vnetWidth + GROUP_PADDING;
+    const rgHeight = Math.max(
+      vnetHeight + VNET_Y + GROUP_PADDING,
+      globalColHeight
+    );
 
-    // Layout child groups in horizontal row (or grid) within parent
-    // Start at same Y as ungrouped services (GROUP_HEADER) to align horizontally
-    let x = GROUP_PADDING + leftColumnWidth;
-    let y = GROUP_HEADER; // Align with top of ungrouped services column
-    let row = 0;
+    const dims = isIso
+      ? snapGroupDimensions(rgWidth)
+      : snapCartesianGroupDimensions(rgWidth, rgHeight);
 
-    childGroups.forEach((childGroup, index) => {
-      const col = index % 2; // 2 columns
+    groupDimensions.set(resourceGroup.id, dims);
+    positions.set(resourceGroup.id, { x: 0, y: 0 });
 
-      if (col === 0 && index > 0) {
-        // New row
-        row++;
-        const prevGroupDims = groupDimensions.get(childGroups[index - 2].id) || { width: 400, height: 250 };
-        x = GROUP_PADDING + leftColumnWidth;
-        y += prevGroupDims.height + 40;
-      }
+    console.log(`[tierLayout] RG "${resourceGroup.data.displayName}" at (0, 0), size ${dims.width}x${dims.height}`);
+  }
 
-      // Child group position is RELATIVE to parent
-      positions.set(childGroup.id, { x, y });
+  // STEP 5: Handle orphaned services (no logical parent)
+  const orphanedServices = services.filter(s => !s.data.logicalParent);
+  console.log(`[tierLayout] Found ${orphanedServices.length} orphaned services`);
 
-      console.log(`[tierLayoutSimple] Nested group "${childGroup.data.displayName}" positioned at (${x}, ${y}) inside parent "${parentId}"`);
+  orphanedServices.forEach((service, index) => {
+    const x = (resourceGroup && vnet)
+      ? (groupDimensions.get(resourceGroup.id)?.width || 0) + 100
+      : 100;
+    const y = 100 + index * (nodeH + NODE_SPACING);
 
-      if (col === 0) {
-        const dims = groupDimensions.get(childGroup.id) || { width: 400, height: 250 };
-        x += dims.width + 40;
+    const pos = isIso ? snapToIsoGrid(x, y) : snapToCartesianGrid(x, y);
+    positions.set(service.id, pos);
+
+    console.log(`[tierLayout] Orphaned service "${service.data.displayName}" at (${pos.x}, ${pos.y})`);
+  });
+
+  // Store group dimensions in node.data.properties for GroupBackgrounds component
+  groups.forEach(group => {
+    const dims = groupDimensions.get(group.id);
+    if (dims && group.data.properties) {
+      group.data.properties.width = dims.width;
+      group.data.properties.height = dims.height;
+    }
+  });
+
+  // STEP 5: Collision detection - ensure no nodes overlap
+  console.log('[tierLayout] Running collision detection...');
+  const allNodes = [...services, ...groups];
+  let collisionCount = 0;
+
+  allNodes.forEach((node, index) => {
+    const pos1 = positions.get(node.id);
+    if (!pos1) return;
+
+    const width1 = node.type === 'group' ? (groupDimensions.get(node.id)?.width || 0) : nodeW;
+    const height1 = node.type === 'group' ? (groupDimensions.get(node.id)?.height || 0) : nodeH;
+
+    // Check against all OTHER nodes
+    allNodes.forEach((otherNode, otherIndex) => {
+      if (index >= otherIndex) return; // Skip self and already-checked pairs
+
+      const pos2 = positions.get(otherNode.id);
+      if (!pos2) return;
+
+      const width2 = otherNode.type === 'group' ? (groupDimensions.get(otherNode.id)?.width || 0) : nodeW;
+      const height2 = otherNode.type === 'group' ? (groupDimensions.get(otherNode.id)?.height || 0) : nodeH;
+
+      // CRITICAL: Only check collisions between SIBLING nodes (same logical parent)
+      // Nodes at different levels in the hierarchy should NOT be checked against each other
+      // Example: Services inside subnets SHOULD overlap their parent subnets - that's intentional nesting
+      const hasSameParent = node.data.logicalParent === otherNode.data.logicalParent;
+      if (!hasSameParent) return; // Different hierarchy levels, skip collision check
+
+      // Check for overlap (with 10px margin)
+      const margin = 10;
+      const overlapsX = pos1.x < pos2.x + width2 + margin && pos1.x + width1 + margin > pos2.x;
+      const overlapsY = pos1.y < pos2.y + height2 + margin && pos1.y + height1 + margin > pos2.y;
+
+      if (overlapsX && overlapsY) {
+        collisionCount++;
+        console.warn(`[tierLayout] COLLISION DETECTED: "${node.data.displayName}" overlaps "${otherNode.data.displayName}"`);
+        console.warn(`  Node 1: (${pos1.x}, ${pos1.y}) ${width1}x${height1}`);
+        console.warn(`  Node 2: (${pos2.x}, ${pos2.y}) ${width2}x${height2}`);
+
+        // Move node2 down to avoid overlap
+        const newY = pos1.y + height1 + NODE_SPACING;
+        positions.set(otherNode.id, { x: pos2.x, y: newY });
+        console.warn(`  → Moved "${otherNode.data.displayName}" to (${pos2.x}, ${newY})`);
       }
     });
   });
 
-  // Position top-level groups (Resource Groups) sequentially left-to-right
-  const topLevelGroups = groups.filter(g => !groupNesting.has(g.id));
+  console.log(`[tierLayout] Collision detection complete: ${collisionCount} collisions fixed`);
+  console.log(`[tierLayout] Complete: ${positions.size} positions, ${groupDimensions.size} group dims`);
 
-  let currentX = 50; // Start position
-  const GROUP_HORIZONTAL_GAP = 100; // Gap between groups
-
-  topLevelGroups.forEach(group => {
-    const dims = groupDimensions.get(group.id) || { width: 400, height: 250 };
-
-    const groupX = currentX;
-    const groupY = TIER_START_Y;
-
-    const pos = isIso
-      ? snapToIsoGrid(groupX, groupY)
-      : { x: groupX, y: groupY };
-
-    positions.set(group.id, pos);
-
-    console.log(`[tierLayoutSimple] Top-level group "${group.data.displayName}" at ${JSON.stringify(pos)}, dims ${JSON.stringify(dims)}`);
-
-    // Advance X for next group (current width + gap)
-    currentX += dims.width + GROUP_HORIZONTAL_GAP;
-  });
-
-  // Step 4: Position ungrouped services in a vertical stack on the LEFT
-  // This creates a left-to-right layout: ungrouped services | VNet (with subnets)
-  const ungrouped = services.filter(s => !s.parentId);
-
-  // Position ungrouped services in a single vertical column on the left
-  ungrouped.forEach((service, index) => {
-    const x = GROUP_PADDING;
-    const y = GROUP_HEADER + index * (nodeH + 20);
-
-    positions.set(service.id, { x, y });
-  });
-
-  console.log(`[tierLayoutSimple] Complete: ${positions.size} positions, ${groupDimensions.size} group dims, ${groupNesting.size} parent assignments`);
-
-  return { positions, groupDimensions, groupNesting };
+  return {
+    positions,
+    groupDimensions,
+    groupNesting: new Map(), // Empty - no longer used with Dual Model Pattern
+  };
 }

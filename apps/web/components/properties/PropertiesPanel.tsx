@@ -3,7 +3,7 @@
 import { useState, useCallback, useMemo } from 'react';
 import { cn } from '@/lib/utils';
 import { useDiagramState } from '@/lib/state/useDiagramState';
-import type { AzureNodeData, AzureNode, NodeStatus } from '@/lib/state/types';
+import type { AzureNodeData, AzureNode, AzureEdge, AzureEdgeData, NodeStatus, ConnectionType } from '@/lib/state/types';
 import type { CostBreakdown } from '@/lib/pricing/types';
 import { PRICING_DESCRIPTORS } from '@/lib/pricing/descriptors';
 import { calculateServiceCost, getDefaultPricingConfig, deriveSku } from '@/lib/pricing/calculateCost';
@@ -12,7 +12,7 @@ import { PricingLineItems } from './PricingLineItems';
 import { RefreshPricingButton } from './RefreshPricingButton';
 
 export function PropertiesPanel() {
-  const { selectedNode, selectedEdge, updateNode, removeNode, removeEdge } = useDiagramState();
+  const { selectedNode, selectedEdge, updateNode, removeNode, removeEdge, updateEdge } = useDiagramState();
 
   const handleNodeDataUpdate = (nodeId: string, currentData: AzureNodeData, updates: Partial<AzureNodeData>) => {
     const newData: AzureNodeData = { ...currentData, ...updates };
@@ -33,6 +33,7 @@ export function PropertiesPanel() {
     return (
       <EdgePropertiesPanel
         edge={selectedEdge}
+        onUpdate={(updates) => updateEdge(selectedEdge.id, updates)}
         onDelete={() => removeEdge(selectedEdge.id)}
       />
     );
@@ -266,30 +267,203 @@ function NodePropertiesPanel({ node, onUpdate, onDelete }: NodePropertiesPanelPr
 
 // ─── Edge Properties Panel ────────────────────────────────────────────────────
 
+const CONN_META: Record<string, {
+  color: string;
+  badge: string;
+  label: string;
+  description: string;
+  wafLevel: 'best' | 'good' | 'warn';
+  wafNote: string;
+}> = {
+  'private-endpoint': {
+    color: '#34d399',
+    badge: 'PE',
+    label: 'Private Endpoint',
+    description: 'Traffic routed via Azure Private Link — stays on the Azure backbone, never traverses the public internet.',
+    wafLevel: 'best',
+    wafNote: 'Azure Well-Architected best practice. Eliminates public-internet exposure for PaaS services.',
+  },
+  'vnet-integration': {
+    color: '#a78bfa',
+    badge: 'VNet',
+    label: 'VNet Integration',
+    description: 'Outbound traffic from the service flows through the VNet. The service itself retains a public endpoint.',
+    wafLevel: 'good',
+    wafNote: 'Good — outbound traffic is controlled. For full isolation also restrict inbound via Private Endpoint.',
+  },
+  'service-endpoint': {
+    color: '#fb923c',
+    badge: 'SE',
+    label: 'Service Endpoint',
+    description: 'Traffic goes over the optimised Azure backbone path, but the target service still exposes a public IP.',
+    wafLevel: 'warn',
+    wafNote: 'Consider upgrading to Private Endpoint for zero public-internet exposure (WAF: Security pillar).',
+  },
+  'peering': {
+    color: '#22d3ee',
+    badge: 'Peer',
+    label: 'VNet Peering',
+    description: 'Network-level routing between two VNets. Traffic is private and low-latency.',
+    wafLevel: 'good',
+    wafNote: 'Ensure NSG rules control cross-VNet traffic. Use hub-and-spoke or Azure Firewall for central inspection.',
+  },
+  'public': {
+    color: '#94a3b8',
+    badge: null as unknown as string,
+    label: 'Public',
+    description: 'Traffic routes over the public internet. Subject to internet latency and exposure.',
+    wafLevel: 'warn',
+    wafNote: 'Security risk — consider Private Endpoint or at minimum TLS + IP allowlisting.',
+  },
+};
+
+const WAF_ICONS = { best: '✅', good: '✓', warn: '⚠️' };
+const WAF_COLORS = {
+  best: 'text-green-600 dark:text-green-400',
+  good: 'text-blue-600 dark:text-blue-400',
+  warn: 'text-amber-600 dark:text-amber-400',
+};
+
 interface EdgePropertiesPanelProps {
-  edge: { id: string; source: string; target: string; data?: { connectionType?: string; isEncrypted?: boolean } };
+  edge: { id: string; source: string; target: string; data?: Partial<AzureEdgeData> };
+  onUpdate: (updates: Partial<AzureEdge>) => void;
   onDelete: () => void;
 }
 
-function EdgePropertiesPanel({ edge, onDelete }: EdgePropertiesPanelProps) {
+function EdgePropertiesPanel({ edge, onUpdate, onDelete }: EdgePropertiesPanelProps) {
+  const { state } = useDiagramState();
+
+  const sourceNode = state.nodes.find(n => n.id === edge.source);
+  const targetNode = state.nodes.find(n => n.id === edge.target);
+
+  const connType = edge.data?.connectionType || 'public';
+  const meta = CONN_META[connType] ?? CONN_META['public'];
+
+  // Resolve which container each node sits in
+  const resolveContainer = (node: typeof sourceNode) => {
+    if (!node) return null;
+    const parent = node.data.logicalParent
+      ? state.nodes.find(n => n.id === node.data.logicalParent)
+      : null;
+    return parent?.data.displayName ?? null;
+  };
+
+  const srcContainer = resolveContainer(sourceNode);
+  const tgtContainer = resolveContainer(targetNode);
+
   return (
     <div className="h-full flex flex-col bg-card border-l">
+      {/* Header */}
       <div className="p-4 border-b">
-        <h2 className="font-semibold text-lg">Connection</h2>
-        <p className="text-sm text-muted-foreground">
-          {edge.source} &rarr; {edge.target}
-        </p>
+        <div className="flex items-center gap-2 mb-1">
+          <div
+            className="w-3 h-3 rounded-full flex-shrink-0"
+            style={{ background: meta.color }}
+          />
+          <h2 className="font-semibold text-lg">Connection</h2>
+        </div>
+        <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+          <span className="font-medium text-foreground truncate max-w-[90px]">
+            {sourceNode?.data.displayName ?? edge.source}
+          </span>
+          <span>→</span>
+          <span className="font-medium text-foreground truncate max-w-[90px]">
+            {targetNode?.data.displayName ?? edge.target}
+          </span>
+        </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        <PropertyField label="Connection Type">
-          <span className="text-sm capitalize">{edge.data?.connectionType || 'public'}</span>
-        </PropertyField>
-        <PropertyField label="Encrypted">
-          <span className="text-sm">{edge.data?.isEncrypted ? 'Yes' : 'No'}</span>
-        </PropertyField>
+      <div className="flex-1 overflow-y-auto">
+        {/* Endpoints */}
+        <CollapsibleSection title="Endpoints" isOpen={true} onToggle={() => {}}>
+          <div className="space-y-3">
+            {/* Source */}
+            <div className="rounded-md border bg-muted/30 p-2.5">
+              <div className="flex items-center gap-1.5 mb-0.5">
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">FROM</span>
+              </div>
+              <p className="text-sm font-medium">{sourceNode?.data.displayName ?? edge.source}</p>
+              {sourceNode && (
+                <p className="text-xs text-muted-foreground capitalize mt-0.5">
+                  {sourceNode.data.serviceType.replace(/-/g, ' ')}
+                  {srcContainer ? ` · ${srcContainer}` : ''}
+                </p>
+              )}
+            </div>
+            {/* Target */}
+            <div className="rounded-md border bg-muted/30 p-2.5">
+              <div className="flex items-center gap-1.5 mb-0.5">
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">TO</span>
+              </div>
+              <p className="text-sm font-medium">{targetNode?.data.displayName ?? edge.target}</p>
+              {targetNode && (
+                <p className="text-xs text-muted-foreground capitalize mt-0.5">
+                  {targetNode.data.serviceType.replace(/-/g, ' ')}
+                  {tgtContainer ? ` · ${tgtContainer}` : ''}
+                </p>
+              )}
+            </div>
+          </div>
+        </CollapsibleSection>
+
+        {/* Connection Details */}
+        <CollapsibleSection title="Connection Details" isOpen={true} onToggle={() => {}}>
+          <PropertyField label="Type">
+            <select
+              value={connType}
+              onChange={(e) => onUpdate({
+                data: {
+                  isEncrypted: true,
+                  ...edge.data,
+                  connectionType: e.target.value as ConnectionType,
+                } as AzureEdgeData,
+              })}
+              className="w-full text-sm bg-muted border border-border rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-ring"
+            >
+              <option value="private-endpoint">Private Endpoint</option>
+              <option value="vnet-integration">VNet Integration</option>
+              <option value="service-endpoint">Service Endpoint</option>
+              <option value="peering">VNet Peering</option>
+              <option value="public">Public</option>
+            </select>
+          </PropertyField>
+          <p className="text-xs text-muted-foreground leading-relaxed mt-1">{meta.description}</p>
+
+          <PropertyField label="Encrypted">
+            <span className={cn('text-sm font-medium', edge.data?.isEncrypted !== false ? 'text-green-600 dark:text-green-400' : 'text-red-500')}>
+              {edge.data?.isEncrypted !== false ? '✓ Yes' : '✗ No'}
+            </span>
+          </PropertyField>
+
+          {edge.data?.protocol && (
+            <PropertyField label="Protocol">
+              <span className="text-sm font-mono">{edge.data.protocol}</span>
+            </PropertyField>
+          )}
+
+          {edge.data?.port && (
+            <PropertyField label="Port">
+              <span className="text-sm font-mono">{edge.data.port}</span>
+            </PropertyField>
+          )}
+
+          {edge.data?.label && (
+            <PropertyField label="Label">
+              <span className="text-sm">{edge.data.label}</span>
+            </PropertyField>
+          )}
+        </CollapsibleSection>
+
+        {/* WAF Assessment */}
+        <CollapsibleSection title="WAF Assessment" isOpen={true} onToggle={() => {}}>
+          <div className={cn('flex gap-2 text-sm', WAF_COLORS[meta.wafLevel])}>
+            <span className="flex-shrink-0 mt-0.5">{WAF_ICONS[meta.wafLevel]}</span>
+            <p className="text-xs leading-relaxed">{meta.wafNote}</p>
+          </div>
+        </CollapsibleSection>
       </div>
 
+      {/* Actions */}
       <div className="p-4 border-t">
         <button
           onClick={onDelete}

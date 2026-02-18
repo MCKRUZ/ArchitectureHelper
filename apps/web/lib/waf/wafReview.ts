@@ -1,5 +1,7 @@
 import type { AzureNode, AzureEdge, ArchReviewFinding, CostSummary } from '@/lib/state/types';
 import { COST_ESTIMATES } from './costEstimates';
+import { getAncestors } from '@/lib/state/useLogicalTree';
+import type { LogicalTree } from '@/lib/state/useLogicalTree';
 
 interface WafReviewResult {
   findings: ArchReviewFinding[];
@@ -243,7 +245,27 @@ export function runWafReview(nodes: AzureNode[], edges: AzureEdge[]): WafReviewR
     }
   });
 
-  // Calculate cost summary
+  // Build logical tree for cost rollup
+  const logicalTree: LogicalTree = {
+    children: new Map<string, string[]>(),
+    parents: new Map<string, string>(),
+    roots: [],
+  };
+
+  for (const node of nodes) {
+    const logicalParent = node.data.logicalParent;
+    if (logicalParent) {
+      logicalTree.parents.set(node.id, logicalParent);
+      if (!logicalTree.children.has(logicalParent)) {
+        logicalTree.children.set(logicalParent, []);
+      }
+      logicalTree.children.get(logicalParent)!.push(node.id);
+    } else {
+      logicalTree.roots.push(node.id);
+    }
+  }
+
+  // Calculate cost summary using logical tree
   const byService: Record<string, number> = {};
   const byResourceGroup: Record<string, number> = {};
   let totalMonthly = 0;
@@ -253,12 +275,21 @@ export function runWafReview(nodes: AzureNode[], edges: AzureEdge[]): WafReviewR
     byService[n.data.displayName] = cost;
     totalMonthly += cost;
 
-    // Attribute cost to parent resource group
-    if (n.parentId) {
-      const parentGroup = groups.find(g => g.id === n.parentId);
-      if (parentGroup) {
-        const rgName = parentGroup.data.displayName;
-        byResourceGroup[rgName] = (byResourceGroup[rgName] ?? 0) + cost;
+    // Attribute cost to parent resource group using logical tree
+    if (n.data.logicalParent) {
+      // Walk up the logical tree to find the Resource Group
+      const ancestors = getAncestors(n.id, logicalTree);
+      const resourceGroupId = ancestors.find(ancestorId => {
+        const ancestor = nodes.find(node => node.id === ancestorId);
+        return ancestor?.data.groupType === 'resource-group';
+      });
+
+      if (resourceGroupId) {
+        const resourceGroup = nodes.find(node => node.id === resourceGroupId);
+        if (resourceGroup) {
+          const rgName = resourceGroup.data.displayName;
+          byResourceGroup[rgName] = (byResourceGroup[rgName] ?? 0) + cost;
+        }
       }
     }
   });
