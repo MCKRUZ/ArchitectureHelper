@@ -72,21 +72,25 @@ export function Toolbar() {
         <div className="flex items-center gap-1 bg-muted rounded-lg p-1">
           <ViewModeButton
             label="2D"
+            tooltip="Standard diagram view. Drag services, draw connections, and edit properties."
             active={state.viewMode === '2d'}
             onClick={() => handleViewModeChange('2d')}
           />
           <ViewModeButton
             label="Isometric"
+            tooltip="3D isometric view of your architecture."
             active={state.viewMode === 'isometric'}
             onClick={() => handleViewModeChange('isometric')}
           />
           <ViewModeButton
             label="Cost"
+            tooltip="Cost heatmap — nodes shift green → amber → red based on monthly spend. Cheapest services are green, most expensive are red."
             active={state.viewMode === 'cost-heatmap'}
             onClick={() => handleViewModeChange('cost-heatmap')}
           />
           <ViewModeButton
             label="Compliance"
+            tooltip="WAF compliance overlay — node borders reflect Well-Architected Framework findings. Red = critical issue, amber = warning, green = no findings."
             active={state.viewMode === 'compliance'}
             onClick={() => handleViewModeChange('compliance')}
           />
@@ -120,6 +124,45 @@ export function Toolbar() {
         </div>
       </div>
 
+      {/* Active mode info banner */}
+      {state.viewMode === 'cost-heatmap' && (
+        <div className="flex items-center gap-2 px-4 py-1.5 bg-amber-950/60 border-b border-amber-800/40 text-amber-200 text-xs">
+          <span className="text-amber-400 font-bold text-sm">💰</span>
+          <span>
+            <strong>Cost Heatmap</strong> — Node colour reflects monthly spend relative to the most expensive service.
+            <span className="ml-2 text-amber-300/70">Green = cheapest · Amber = moderate · Red = most expensive</span>
+          </span>
+          <button
+            onClick={() => handleViewModeChange('2d')}
+            className="ml-auto text-amber-400 hover:text-amber-200 font-medium shrink-0"
+          >
+            ✕ Exit
+          </button>
+        </div>
+      )}
+      {state.viewMode === 'compliance' && (
+        <div className="flex items-center gap-2 px-4 py-1.5 bg-blue-950/60 border-b border-blue-800/40 text-blue-200 text-xs">
+          <span className="text-blue-400 font-bold text-sm">🛡</span>
+          <span>
+            <strong>Compliance Overlay</strong> — Node borders reflect Well-Architected Framework findings.
+            <span className="ml-2 text-blue-300/70">
+              <span className="text-red-400 font-semibold">Red</span> = critical ·{' '}
+              <span className="text-amber-400 font-semibold">Amber</span> = warning ·{' '}
+              <span className="text-green-400 font-semibold">Green</span> = no findings
+            </span>
+            {(!state.validationResults || state.validationResults.length === 0) && (
+              <span className="ml-2 text-blue-300/50 italic">— generate an architecture via AI to populate findings</span>
+            )}
+          </span>
+          <button
+            onClick={() => handleViewModeChange('2d')}
+            className="ml-auto text-blue-400 hover:text-blue-200 font-medium shrink-0"
+          >
+            ✕ Exit
+          </button>
+        </div>
+      )}
+
       {/* Cost breakdown slide-over */}
       <CostBreakdownPanel
         isOpen={showCostBreakdown}
@@ -129,28 +172,37 @@ export function Toolbar() {
   );
 }
 
-// View mode toggle button
+// View mode toggle button with tooltip
 function ViewModeButton({
   label,
+  tooltip,
   active,
   onClick,
 }: {
   label: string;
+  tooltip: string;
   active: boolean;
   onClick: () => void;
 }) {
   return (
-    <button
-      onClick={onClick}
-      className={cn(
-        'px-3 py-1.5 text-sm font-medium rounded-md transition-colors',
-        active
-          ? 'bg-background text-foreground shadow-sm'
-          : 'text-muted-foreground hover:text-foreground'
-      )}
-    >
-      {label}
-    </button>
+    <div className="relative group">
+      <button
+        onClick={onClick}
+        className={cn(
+          'px-3 py-1.5 text-sm font-medium rounded-md transition-colors',
+          active
+            ? 'bg-background text-foreground shadow-sm'
+            : 'text-muted-foreground hover:text-foreground'
+        )}
+      >
+        {label}
+      </button>
+      {/* Tooltip */}
+      <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 w-64 px-3 py-2 bg-popover text-popover-foreground text-xs rounded-md shadow-lg border border-border opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50 leading-relaxed">
+        {tooltip}
+        <div className="absolute -top-1.5 left-1/2 -translate-x-1/2 w-3 h-3 bg-popover border-l border-t border-border rotate-45" />
+      </div>
+    </div>
   );
 }
 
