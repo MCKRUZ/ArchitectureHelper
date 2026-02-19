@@ -21,7 +21,7 @@
 'use client';
 
 import { useRef, useState, useEffect, useCallback, useMemo } from 'react';
-import { Stage, Layer, Rect, Group, Text, Circle, Line, Arrow, Image as KonvaImage } from 'react-konva';
+import { Stage, Layer, Rect, Group, Text, Circle, Line, Arrow, Image as KonvaImage, Shape } from 'react-konva';
 import { useDiagramState } from '@/lib/state/useDiagramState';
 import { useCopilotActions } from './useCopilotActions';
 import { generateId } from '@/lib/utils';
@@ -70,6 +70,46 @@ const NODE_SPACING = 150; // More spacing to prevent overlap
 const ICON_SIZE = 48;
 const GRID_SIZE = 40;
 const GROUP_PADDING = 60; // Extra padding for groups
+
+// Isometric cube dimensions — small flat diamond style matching old GenericAzureNode (DW=80, DH=40, D=15)
+// Must match NODE_W_ISO=80, NODE_H_ISO=80 in tierLayoutSimple.ts
+const ISO_DW     = 80;  // diamond width
+const ISO_DH     = 40;  // diamond height (= DW/2 for 2:1 iso ratio)
+const ISO_D      = 15;  // cube depth (side face height)
+const ISO_ICON   = 20;  // icon rendered flat on top face
+const ISO_HALF_DW = ISO_DW / 2;  // 40 — horizontal midpoint
+const ISO_HALF_DH = ISO_DH / 2;  // 20 — vertical midpoint of top face
+
+// Cloudcraft-style face colors — light source from upper-right
+const ISO_TOP_COLOR   = '#f0f0f2'; // near white — lightest face
+const ISO_RIGHT_COLOR = '#c4c4c8'; // medium gray — oblique light
+const ISO_LEFT_COLOR  = '#9a9a9f'; // shadow gray — darkest face
+const ISO_STROKE_COLOR = '#aaaaaf';// hairline between faces
+
+// Pre-computed face polygons (local coords, origin = bounding box top-left)
+const ISO_TOP_FACE   = [ISO_HALF_DW, 0,  ISO_DW, ISO_HALF_DH,  ISO_HALF_DW, ISO_DH,  0, ISO_HALF_DH];
+const ISO_RIGHT_FACE = [ISO_DW, ISO_HALF_DH,  ISO_DW, ISO_HALF_DH + ISO_D,  ISO_HALF_DW, ISO_DH + ISO_D,  ISO_HALF_DW, ISO_DH];
+const ISO_LEFT_FACE  = [ISO_HALF_DW, ISO_DH,  ISO_HALF_DW, ISO_DH + ISO_D,  0, ISO_HALF_DH + ISO_D,  0, ISO_HALF_DH];
+
+/** Blend a hex color towards black by `amount` (0–1). */
+function darkenHex(hex: string, amount: number): string {
+  const n = parseInt(hex.replace('#', ''), 16);
+  const d = 1 - amount;
+  const r = Math.max(0, Math.round(((n >> 16) & 0xff) * d));
+  const g = Math.max(0, Math.round(((n >> 8) & 0xff) * d));
+  const b = Math.max(0, Math.round((n & 0xff) * d));
+  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+}
+
+/** Measure actual rendered text width using an off-screen canvas. */
+function measureTextWidth(text: string, fontSize: number, fontStyle: string): number {
+  if (typeof document === 'undefined') return text.length * 7; // SSR fallback
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return text.length * 7;
+  ctx.font = `${fontStyle} ${fontSize}px sans-serif`;
+  return ctx.measureText(text).width;
+}
 
 export function KonvaCanvas() {
   const {
@@ -399,8 +439,9 @@ export function KonvaCanvas() {
     const node = state.nodes.find(n => n.id === nodeId);
     if (!node) return;
     const pos = nodePositions.get(nodeId) ?? node.position;
-    const startX = pos.x + NODE_W;
-    const startY = pos.y + NODE_H / 2;
+    const isIso = state.viewMode === 'isometric';
+    const startX = pos.x + (isIso ? ISO_DW     : NODE_W);
+    const startY = pos.y + (isIso ? ISO_HALF_DH : NODE_H / 2);
     setDragConnection({ sourceId: nodeId, startX, startY, currentX: startX, currentY: startY });
     setConnectionTargetId(null);
   }, [state.nodes, nodePositions]);
@@ -1018,43 +1059,59 @@ export function KonvaCanvas() {
     'public':           { stroke: '#94a3b8', dash: [8, 4],  sw: 1.5, badge: null   },
   };
 
-  // Generate grid lines
+  // Generate grid lines — Cartesian in 2D, iso diamond in isometric mode
   const gridLines = useMemo(() => {
     const lines: React.ReactElement[] = [];
-    const gridColor = '#1a2332';
-    const width = 4000;
-    const height = 3000;
+    const isIso = state.viewMode === 'isometric';
 
-    // Vertical lines
-    for (let x = 0; x <= width; x += GRID_SIZE) {
+    if (!isIso) {
+      // Cartesian square grid (2D / heatmap / compliance modes)
+      const gridColor = '#1a2332';
+      const width = 4000;
+      const height = 3000;
+      for (let x = 0; x <= width; x += GRID_SIZE) {
+        lines.push(<Line key={`v-${x}`} points={[x, 0, x, height]} stroke={gridColor} strokeWidth={1} opacity={0.3} listening={false} />);
+      }
+      for (let y = 0; y <= height; y += GRID_SIZE) {
+        lines.push(<Line key={`h-${y}`} points={[0, y, width, y]} stroke={gridColor} strokeWidth={1} opacity={0.3} listening={false} />);
+      }
+      return lines;
+    }
+
+    // Isometric diamond grid — two families of ±30° diagonal lines
+    // Family A: slope +0.5 (y = 0.5x + b)  →  NE direction
+    // Family B: slope -0.5 (y = -0.5x + b) →  NW direction
+    // Cell height = ISO_HALF_DH (20px) — minor lines every 20px, major every 40px
+    const W = 5000; const H = 4000; const OVER = 1000;
+    const step = ISO_HALF_DH; // 20px between parallel lines
+    const majorColor = '#2d5080';
+    const minorColor = '#1e3860';
+
+    for (let b = -(H + OVER); b <= H + OVER; b += step) {
+      const isMajor = (Math.round(b / step) % 2 === 0);
+      // Family A: y = 0.5x + b
       lines.push(
-        <Line
-          key={`v-${x}`}
-          points={[x, 0, x, height]}
-          stroke={gridColor}
-          strokeWidth={1}
-          opacity={0.3}
+        <Line key={`ia-${b}`}
+          points={[-OVER, 0.5 * -OVER + b,  W + OVER, 0.5 * (W + OVER) + b]}
+          stroke={isMajor ? majorColor : minorColor}
+          strokeWidth={isMajor ? 1.5 : 0.75}
+          opacity={isMajor ? 0.7 : 0.35}
+          listening={false}
+        />
+      );
+      // Family B: y = -0.5x + b
+      lines.push(
+        <Line key={`ib-${b}`}
+          points={[-OVER, -0.5 * -OVER + b,  W + OVER, -0.5 * (W + OVER) + b]}
+          stroke={isMajor ? majorColor : minorColor}
+          strokeWidth={isMajor ? 1.5 : 0.75}
+          opacity={isMajor ? 0.7 : 0.35}
           listening={false}
         />
       );
     }
-
-    // Horizontal lines
-    for (let y = 0; y <= height; y += GRID_SIZE) {
-      lines.push(
-        <Line
-          key={`h-${y}`}
-          points={[0, y, width, y]}
-          stroke={gridColor}
-          strokeWidth={1}
-          opacity={0.3}
-          listening={false}
-        />
-      );
-    }
-
     return lines;
-  }, []);
+  }, [state.viewMode]);
 
   // Edge fan-out: stagger multiple edges that share the same source→target pair
   const edgeFanMap = useMemo(() => {
@@ -1136,10 +1193,11 @@ export function KonvaCanvas() {
             const sourcePos = nodePositions.get(edge.source) ?? sourceNode.position;
             const targetPos = nodePositions.get(edge.target) ?? targetNode.position;
 
-            const srcW = sourceNode.type === 'group' ? (sourceNode.data.properties?.width as number ?? 400) : NODE_W;
-            const srcH = sourceNode.type === 'group' ? (sourceNode.data.properties?.height as number ?? 250) : NODE_H;
-            const tgtW = targetNode.type === 'group' ? (targetNode.data.properties?.width as number ?? 400) : NODE_W;
-            const tgtH = targetNode.type === 'group' ? (targetNode.data.properties?.height as number ?? 250) : NODE_H;
+            const isIsoMode = state.viewMode === 'isometric';
+            const srcW = sourceNode.type === 'group' ? (sourceNode.data.properties?.width as number ?? 400) : isIsoMode ? ISO_DW : NODE_W;
+            const srcH = sourceNode.type === 'group' ? (sourceNode.data.properties?.height as number ?? 250) : isIsoMode ? ISO_DH : NODE_H;
+            const tgtW = targetNode.type === 'group' ? (targetNode.data.properties?.width as number ?? 400) : isIsoMode ? ISO_DW : NODE_W;
+            const tgtH = targetNode.type === 'group' ? (targetNode.data.properties?.height as number ?? 250) : isIsoMode ? ISO_DH : NODE_H;
 
             const srcCenterX = sourcePos.x + srcW / 2;
             const tgtCenterX = targetPos.x + tgtW / 2;
@@ -1238,6 +1296,130 @@ export function KonvaCanvas() {
             const height = group.data.properties?.height as number ?? 250;
 
             const isSelected = selectedId === group.id || selectedNodeIds.has(group.id);
+
+            // --- ISOMETRIC GROUP: true iso diamond (rhombus) ---
+            // All 4 edges follow iso grid lines exactly (slopes ±0.5), like the red overlay in the design.
+            // Shape: Top(W/2, 0), Right(W, dH/2), Bottom(W/2, dH), Left(0, dH/2)
+            // where dH = W/2  →  all edges have slope = ±dH/2 / (W/2) = ±0.5 ✓
+            if (state.viewMode === 'isometric') {
+              const isoGroupStyles = {
+                'resource-group': { fillColor: '#1e40af', fillOpacity: 0.06, stroke: '#60a5fa', labelColor: '#93c5fd' },
+                'virtual-network': { fillColor: '#065f46', fillOpacity: 0.08, stroke: '#34d399', labelColor: '#6ee7b7' },
+                'subnet':          { fillColor: '#4c1d95', fillOpacity: 0.10, stroke: '#a78bfa', labelColor: '#c4b5fd' },
+              };
+              const gs = isoGroupStyles[group.data.groupType as keyof typeof isoGroupStyles]
+                       ?? isoGroupStyles['resource-group'];
+
+              // Diamond: W × (W/2) bounding box. All edges slope ±0.5 — traces the iso grid exactly.
+              const dH = width * 0.5;  // diamond height = W/2
+              const diamondPoints = [
+                width / 2, 0,       // Top vertex
+                width,     dH / 2,  // Right vertex  (= W/4 from top)
+                width / 2, dH,      // Bottom vertex
+                0,         dH / 2,  // Left vertex
+              ];
+
+              // Label sits ON the top-right edge, rotated +26.57° (downhill, same as App-VNet/Subnet labels).
+              const labelText = group.data.displayName;
+              // Measure actual text width so the pill always fits the label exactly.
+              // 20px padding = 10px each side.
+              const labelW = measureTextWidth(labelText, 11, '600') + 20;
+              const ISO_EDGE_ANGLE = Math.atan(0.5) * (180 / Math.PI); // ≈ 26.57°
+              const labelAnchorX = width / 2;
+              const labelAnchorY = 0;
+
+              return (
+                <Group key={group.id} x={groupX} y={groupY} draggable={false}
+                  onContextMenu={(e) => handleNodeContextMenu(group.id, e)}>
+                  {/* Filled diamond background */}
+                  <Line
+                    points={diamondPoints}
+                    closed
+                    fill={gs.fillColor}
+                    opacity={gs.fillOpacity}
+                    stroke="transparent"
+                    strokeWidth={0}
+                    listening={false}
+                  />
+                  {/* Dashed diamond border — all 4 edges follow iso grid lines */}
+                  <Line
+                    points={diamondPoints}
+                    closed
+                    fill="transparent"
+                    stroke={isSelected ? '#fbbf24' : gs.stroke}
+                    strokeWidth={isSelected ? 2 : 1.5}
+                    dash={[12, 6]}
+                    shadowColor={isSelected ? '#fbbf24' : 'transparent'}
+                    shadowBlur={isSelected ? 12 : 0}
+                    shadowOpacity={isSelected ? 0.5 : 0}
+                    listening={false}
+                  />
+                  {/* Label parallelogram — sits ABOVE the top-right edge.
+                      Bottom edge (y=0) lies on the diamond edge line.
+                      Top edge (y=-pH) lies on the next outer grid line (~17.9px away).
+                      Left/right sides follow the -26.57° grid family (shear = pH * 0.75). */}
+                  <Group
+                    x={labelAnchorX}
+                    y={labelAnchorY}
+                    rotation={ISO_EDGE_ANGLE}
+                  >
+                    {(() => {
+                      const pH = 18;
+                      const shear = pH * 0.75; // 13.5px — side edges follow -26.57° grid family
+                      const r = 5;             // corner radius
+                      const W = labelW;
+                      // Parallelogram corners: bottom on edge (y=0), top above (y=-pH)
+                      const P0 = [4,           0  ];       // BL (on edge)
+                      const P1 = [4 + W,       0  ];       // BR (on edge)
+                      const P2 = [4 + W + shear, -pH];     // TR (above edge)
+                      const P3 = [4 + shear,   -pH];       // TL (above edge)
+                      // Edge unit vectors (same family as iso grid sides)
+                      const e01: [number,number] = [1, 0];         // bottom: →
+                      const e12: [number,number] = [0.6, -0.8];    // right side: ↗
+                      const e23: [number,number] = [-1, 0];        // top: ←
+                      const e30: [number,number] = [-0.6, 0.8];    // left side: ↙
+                      return (
+                        <>
+                          {/* Properly rounded parallelogram via canvas quadraticCurveTo */}
+                          <Shape
+                            sceneFunc={(ctx, shape) => {
+                              ctx.beginPath();
+                              // Start: r before BL along incoming left-side edge
+                              ctx.moveTo(P0[0] - r*e30[0], P0[1] - r*e30[1]);
+                              ctx.quadraticCurveTo(P0[0], P0[1], P0[0]+r*e01[0], P0[1]+r*e01[1]);
+                              ctx.lineTo(P1[0]-r*e01[0], P1[1]-r*e01[1]);
+                              ctx.quadraticCurveTo(P1[0], P1[1], P1[0]+r*e12[0], P1[1]+r*e12[1]);
+                              ctx.lineTo(P2[0]-r*e12[0], P2[1]-r*e12[1]);
+                              ctx.quadraticCurveTo(P2[0], P2[1], P2[0]+r*e23[0], P2[1]+r*e23[1]);
+                              ctx.lineTo(P3[0]-r*e23[0], P3[1]-r*e23[1]);
+                              ctx.quadraticCurveTo(P3[0], P3[1], P3[0]+r*e30[0], P3[1]+r*e30[1]);
+                              ctx.closePath();
+                              ctx.fillStrokeShape(shape);
+                            }}
+                            fill={gs.stroke}
+                            opacity={0.40}
+                            listening={false}
+                          />
+                          {/* Text skewed to match parallelogram lean: skewX = -shear/pH = -0.75
+                              x is computed so the visual gap is equal on both sides.
+                              Because skewX shifts the text left, we must offset rightward by
+                              pillLeftAtTextTopY (left edge of pill at text's y) + padding. */}
+                          <Text
+                            text={labelText}
+                            x={4 + shear * (pH - 4) / pH + 10}
+                            y={-pH + 4}
+                            skewX={-(shear / pH)}
+                            fontSize={11} fontStyle="600"
+                            fill={gs.labelColor}
+                            onClick={() => handleNodeClick(group.id)}
+                          />
+                        </>
+                      );
+                    })()}
+                  </Group>
+                </Group>
+              );
+            }
 
             // Professional Azure-style group rendering - subtle, almost invisible fills
             const styles = {
@@ -1375,6 +1557,170 @@ export function KonvaCanvas() {
             const complianceBorder = isCompliance
               ? hasCritical ? '#ef4444' : hasWarning ? '#f59e0b' : '#10b981'
               : null;
+
+            // Shared event handler props for both iso and 2D
+            const sharedGroupProps = {
+              x: pos.x,
+              y: pos.y,
+              draggable: !dragConnection,
+              onDragEnd: (e: any) => handleServiceDragEnd(service.id, e.target.x(), e.target.y()),
+              onClick: () => handleNodeClick(service.id),
+              onContextMenu: (e: any) => handleNodeContextMenu(service.id, e),
+              onMouseEnter: () => {
+                setHoveredNodeId(service.id);
+                if (dragConnection && dragConnection.sourceId !== service.id) {
+                  setConnectionTargetId(service.id);
+                }
+              },
+              onMouseLeave: () => {
+                setHoveredNodeId(null);
+                if (connectionTargetId === service.id) setConnectionTargetId(null);
+              },
+            };
+
+            // --- ISOMETRIC VIEW (small flat diamond cube style, matches old GenericAzureNode) ---
+            if (state.viewMode === 'isometric') {
+              const faceStroke  = isSelected ? '#fbbf24' : isDragTarget ? '#34d399' : ISO_STROKE_COLOR;
+              const faceStrokeW = (isSelected || isDragTarget) ? 2 : 0.75;
+
+              // Category accent stripe: top 40% of the top diamond
+              const accentT = 0.40;
+              const accentFace = [
+                ISO_HALF_DW,                        0,
+                ISO_HALF_DW + ISO_HALF_DW * accentT, ISO_HALF_DH * accentT,
+                ISO_HALF_DW,                        ISO_DH * accentT,
+                ISO_HALF_DW - ISO_HALF_DW * accentT, ISO_HALF_DH * accentT,
+              ];
+
+              return (
+                <Group key={service.id} {...sharedGroupProps}>
+                  {/* Left face (shadow side) — drawn first */}
+                  <Line points={ISO_LEFT_FACE} closed
+                    fill={ISO_LEFT_COLOR}
+                    stroke={faceStroke} strokeWidth={faceStrokeW}
+                    listening={false}
+                  />
+                  {/* Right face (lit side) */}
+                  <Line points={ISO_RIGHT_FACE} closed
+                    fill={ISO_RIGHT_COLOR}
+                    stroke={faceStroke} strokeWidth={faceStrokeW}
+                    listening={false}
+                  />
+                  {/* Top face (lightest) — rendered last, sits on top */}
+                  <Line points={ISO_TOP_FACE} closed
+                    fill={ISO_TOP_COLOR}
+                    stroke={faceStroke} strokeWidth={faceStrokeW}
+                    shadowColor={isSelected ? '#fbbf24' : isDragTarget ? '#34d399' : 'transparent'}
+                    shadowBlur={isSelected || isDragTarget ? 16 : 0}
+                    shadowOpacity={isSelected || isDragTarget ? 0.9 : 0}
+                    listening={false}
+                  />
+
+                  {/* Category accent stripe on top face */}
+                  <Line points={accentFace} closed
+                    fill={categoryColor}
+                    opacity={0.85}
+                    stroke="transparent"
+                    strokeWidth={0}
+                    listening={false}
+                  />
+
+                  {/* White icon badge (small square behind icon) */}
+                  <Rect
+                    x={ISO_HALF_DW - ISO_ICON / 2 - 2}
+                    y={ISO_HALF_DH - ISO_ICON / 2 - 2}
+                    width={ISO_ICON + 4}
+                    height={ISO_ICON + 4}
+                    fill="white"
+                    cornerRadius={3}
+                    opacity={0.88}
+                    listening={false}
+                  />
+
+                  {/* Icon — flat, centered on top face */}
+                  {iconImages[service.data.serviceType] ? (
+                    <KonvaImage
+                      image={iconImages[service.data.serviceType]}
+                      x={ISO_HALF_DW - ISO_ICON / 2}
+                      y={ISO_HALF_DH - ISO_ICON / 2}
+                      width={ISO_ICON}
+                      height={ISO_ICON}
+                      listening={false}
+                    />
+                  ) : (
+                    <Text
+                      text={serviceInitial}
+                      x={ISO_HALF_DW - 6}
+                      y={ISO_HALF_DH - 7}
+                      fontSize={12}
+                      fontStyle="bold"
+                      fill="#334155"
+                      listening={false}
+                    />
+                  )}
+
+                  {/* Validation badge — at right vertex of top face */}
+                  {state.validationResults?.some(f => f.nodeId === service.id &&
+                    (f.severity === 'critical' || f.severity === 'warning')) && (
+                    <Circle
+                      x={ISO_DW - 6}
+                      y={ISO_HALF_DH - 6}
+                      radius={6}
+                      fill={hasCritical ? '#ef4444' : '#f59e0b'}
+                      shadowBlur={4}
+                      shadowOpacity={0.6}
+                    />
+                  )}
+
+                  {/* Service name label below cube */}
+                  <Text
+                    text={service.data.displayName}
+                    x={-ISO_HALF_DW}
+                    y={ISO_DH + ISO_D + 4}
+                    width={ISO_DW * 2}
+                    fontSize={10}
+                    fontStyle="500"
+                    fill="#cbd5e1"
+                    align="center"
+                    ellipsis
+                    wrap="none"
+                    listening={false}
+                  />
+
+                  {/* Cost label below name (in iso mode, always visible if non-zero) */}
+                  {monthlyCost > 0 && (
+                    <Text
+                      text={`$${monthlyCost < 1000 ? Math.round(monthlyCost) : `${(monthlyCost / 1000).toFixed(1)}k`}/mo`}
+                      x={-ISO_HALF_DW}
+                      y={ISO_DH + ISO_D + 16}
+                      width={ISO_DW * 2}
+                      fontSize={8}
+                      fill="#34d399"
+                      align="center"
+                      listening={false}
+                    />
+                  )}
+
+                  {/* Port handle — at right vertex of top diamond */}
+                  {(isHovered || isDragSource) && !dragConnection && (
+                    <Circle
+                      x={ISO_DW}
+                      y={ISO_HALF_DH}
+                      radius={6}
+                      fill="#10b981"
+                      stroke="#fff"
+                      strokeWidth={1.5}
+                      shadowColor="#10b981"
+                      shadowBlur={8}
+                      shadowOpacity={0.8}
+                      onMouseDown={(e) => handlePortMouseDown(service.id, e)}
+                      onMouseEnter={(e) => { e.target.getStage()!.container().style.cursor = 'crosshair'; }}
+                      onMouseLeave={(e) => { e.target.getStage()!.container().style.cursor = 'default'; }}
+                    />
+                  )}
+                </Group>
+              );
+            }
 
             return (
               <Group

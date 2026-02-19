@@ -6,10 +6,10 @@
  * and useCopilotActions (AI-generated positions).
  */
 
-// Grid constants
+// Grid constants — calibrated to ISO_DW=80, ISO_DH=40, ISO_D=15 in KonvaCanvas.tsx
 const ISO_G = 40;
-const DIAMOND_HALF_W = 40;
-const CUBE_BOTTOM_Y = 55; // DH(40) + D(15) — bottom vertex offset from node top
+const DIAMOND_HALF_W = 40; // ISO_DW / 2
+const CUBE_BOTTOM_Y = 55;  // ISO_DH(40) + ISO_D(15)
 
 /**
  * Snap a service node's position so its BOTTOM vertex sits on the nearest
