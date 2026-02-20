@@ -1676,28 +1676,33 @@ export function KonvaCanvas() {
                     listening={false}
                   />
 
-                  {/* White icon badge (small square behind icon) */}
-                  <Rect
-                    x={ISO_HALF_DW - ISO_ICON / 2 - 2}
-                    y={ISO_HALF_DH - ISO_ICON / 2 - 2}
-                    width={ISO_ICON + 4}
-                    height={ISO_ICON + 4}
-                    fill="white"
-                    cornerRadius={3}
-                    opacity={0.88}
-                    listening={false}
-                  />
-
-                  {/* Icon — flat, centered on top face */}
+                  {/* Icon — iso-projected to fill top face diamond
+                      Transform maps [0,ISO_DW]×[0,ISO_DW] → diamond vertices:
+                        (0,0)→left(0,20), (W,0)→top(40,0), (0,W)→bottom(40,40), (W,W)→right(80,20)
+                      Derived: r=-26.57°, sx=√5/4, sy=1/√5, kx=0.6
+                  */}
                   {iconImages[service.data.serviceType] ? (
-                    <KonvaImage
-                      image={iconImages[service.data.serviceType]}
-                      x={ISO_HALF_DW - ISO_ICON / 2}
-                      y={ISO_HALF_DH - ISO_ICON / 2}
-                      width={ISO_ICON}
-                      height={ISO_ICON}
+                    <Group
+                      x={0}
+                      y={ISO_HALF_DH}
+                      rotation={Math.atan2(-0.5, 1) * (180 / Math.PI)}
+                      scaleX={Math.sqrt(5) / 4}
+                      scaleY={1 / Math.sqrt(5)}
+                      skewX={0.6}
                       listening={false}
-                    />
+                    >
+                      {/* rotation=90 CW; x=ISO_DW compensates so image stays in [0,W]×[0,W] box */}
+                      <KonvaImage
+                        image={iconImages[service.data.serviceType]}
+                        x={ISO_DW}
+                        y={0}
+                        rotation={90}
+                        width={ISO_DW}
+                        height={ISO_DW}
+                        opacity={0.9}
+                        listening={false}
+                      />
+                    </Group>
                   ) : (
                     <Text
                       text={serviceInitial}
