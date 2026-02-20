@@ -109,6 +109,7 @@ interface UseCopilotActionsProps {
   }) => void;
   setValidationResults: (results: ArchReviewFinding[]) => void;
   setCostSummary: (summary: CostSummary) => void;
+  setIsGenerating?: (isGenerating: boolean, message?: string) => void;
 }
 
 /**
@@ -128,6 +129,7 @@ export function useCopilotActions({
   batchUpdate,
   setValidationResults,
   setCostSummary,
+  setIsGenerating,
 }: UseCopilotActionsProps) {
   // Use refs to always have access to latest state/functions in handlers
   const stateRef = useRef(state);
@@ -143,6 +145,7 @@ export function useCopilotActions({
   const batchUpdateRef = useRef(batchUpdate);
   const setValidationResultsRef = useRef(setValidationResults);
   const setCostSummaryRef = useRef(setCostSummary);
+  const setIsGeneratingRef = useRef(setIsGenerating);
 
   // Update refs on each render
   stateRef.current = state;
@@ -157,6 +160,7 @@ export function useCopilotActions({
   removeGroupRef.current = removeGroup;
   batchUpdateRef.current = batchUpdate;
   setValidationResultsRef.current = setValidationResults;
+  setIsGeneratingRef.current = setIsGenerating;
   setCostSummaryRef.current = setCostSummary;
 
   // Memoize the copilot readable value to prevent infinite re-renders
@@ -543,6 +547,9 @@ export function useCopilotActions({
         environments
       });
 
+      // Show loading overlay in the canvas
+      setIsGeneratingRef.current?.(true, `Building architecture with ${services?.length ?? 0} services…`);
+
       // --- Build everything in memory first, then commit atomically ---
 
       const serviceList = services as Array<{ serviceType: string; displayName: string; description?: string }>;
@@ -872,6 +879,9 @@ export function useCopilotActions({
         positionUpdates: finalPositionUpdates.length,
         resultMsg
       });
+
+      // Hide loading overlay
+      setIsGeneratingRef.current?.(false);
 
       return resultMsg;
     },

@@ -101,6 +101,30 @@ function darkenHex(hex: string, amount: number): string {
   return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
 }
 
+/** How many levels deep is a node in the logicalParent hierarchy (0 = top-level). */
+function getGroupDepth(nodeId: string, allNodes: AzureNode[]): number {
+  const node = allNodes.find(n => n.id === nodeId);
+  if (!node?.data.logicalParent) return 0;
+  return 1 + getGroupDepth(node.data.logicalParent, allNodes);
+}
+
+/**
+ * Return all non-group descendants of a group (direct children of the group
+ * AND children of any nested sub-groups, at any depth).
+ * Used to compute the dynamic bounding box for iso diamond groups.
+ */
+function collectDescendantServices(groupId: string, allNodes: AzureNode[]): AzureNode[] {
+  return allNodes.filter(n => {
+    if (n.type === 'group') return false;
+    let parentId: string | undefined = n.data.logicalParent;
+    while (parentId) {
+      if (parentId === groupId) return true;
+      parentId = allNodes.find(p => p.id === parentId)?.data.logicalParent;
+    }
+    return false;
+  });
+}
+
 /** Measure actual rendered text width using an off-screen canvas. */
 function measureTextWidth(text: string, fontSize: number, fontStyle: string): number {
   if (typeof document === 'undefined') return text.length * 7; // SSR fallback
@@ -109,6 +133,43 @@ function measureTextWidth(text: string, fontSize: number, fontStyle: string): nu
   if (!ctx) return text.length * 7;
   ctx.font = `${fontStyle} ${fontSize}px sans-serif`;
   return ctx.measureText(text).width;
+}
+
+/**
+ * Project 2D layout coordinates → isometric screen coordinates.
+ *
+ * The iso grid has two families of lines:
+ *   Family A: y = +0.5x + b  (slope +0.5, right-downward)
+ *   Family B: y = -0.5x + b  (slope -0.5, right-upward)
+ *
+ * Mapping so that:
+ *   • Moving along layout X (tier axis) follows Family A → d_screen = (1, +0.5) · Δpx  (right-down)
+ *   • Moving along layout Y (row axis)  follows Family B → d_screen = (1, -0.5) · Δpy  (right-up)
+ *
+ *   screen_x = px + py
+ *   screen_y = (px - py) * 0.5         ← clockwise orientation (tiers go right-down)
+ *
+ * ISO_PROJ_OFFSET_Y keeps the diagram in positive screen-y space.
+ * (Typical px range 0–2500, py range 0–1500 → min raw screen_y = (0-1500)*0.5 = -750)
+ */
+const ISO_PROJ_OFFSET_X = 50;
+const ISO_PROJ_OFFSET_Y = 900;
+
+function isoProject(px: number, py: number): { x: number; y: number } {
+  return {
+    x: px + py + ISO_PROJ_OFFSET_X,
+    y: (px - py) * 0.5 + ISO_PROJ_OFFSET_Y,
+  };
+}
+
+/** Inverse of isoProject — converts projected screen coords back to layout coords. */
+function isoUnproject(sx: number, sy: number): { x: number; y: number } {
+  const adjX = sx - ISO_PROJ_OFFSET_X;
+  const adjY = sy - ISO_PROJ_OFFSET_Y;
+  return {
+    x: (adjX + 2 * adjY) / 2,
+    y: (adjX - 2 * adjY) / 2,
+  };
 }
 
 export function KonvaCanvas() {
@@ -132,6 +193,15 @@ export function KonvaCanvas() {
     updateNodesPositions,
   } = useDiagramState();
 
+  // AI generation loading state — must be declared before useCopilotActions
+  const [isGenerating, setIsGeneratingRaw] = useState(false);
+  const [generatingMessage, setGeneratingMessage] = useState('');
+  const setIsGenerating = useCallback((generating: boolean, message?: string) => {
+    setIsGeneratingRaw(generating);
+    if (message) setGeneratingMessage(message);
+    if (!generating) setGeneratingMessage('');
+  }, []);
+
   // Initialize CopilotKit AI actions
   useCopilotActions({
     state,
@@ -147,6 +217,7 @@ export function KonvaCanvas() {
     batchUpdate,
     setValidationResults,
     setCostSummary,
+    setIsGenerating,
   });
 
   // Load Azure service icons for Konva
@@ -355,6 +426,12 @@ export function KonvaCanvas() {
   const groups = useMemo(() => state.nodes.filter(n => n.type === 'group'), [state.nodes]);
   const services = useMemo(() => state.nodes.filter(n => n.type !== 'group'), [state.nodes]);
 
+  // Render groups shallowest-first so deeper groups (subnets) appear on top in Konva.
+  const sortedGroups = useMemo(
+    () => [...groups].sort((a, b) => getGroupDepth(a.id, state.nodes) - getGroupDepth(b.id, state.nodes)),
+    [groups, state.nodes]
+  );
+
   // Calculate tier-based positions
   const servicePositions = useMemo(() => {
     const positions = new Map<string, { x: number; y: number }>();
@@ -440,11 +517,20 @@ export function KonvaCanvas() {
     if (!node) return;
     const pos = nodePositions.get(nodeId) ?? node.position;
     const isIso = state.viewMode === 'isometric';
-    const startX = pos.x + (isIso ? ISO_DW     : NODE_W);
-    const startY = pos.y + (isIso ? ISO_HALF_DH : NODE_H / 2);
+    let startX: number, startY: number;
+    if (isIso) {
+      // Port handle is at right vertex of top diamond in local coords (ISO_DW, ISO_HALF_DH)
+      // Add the projected Group origin to get screen position
+      const projPos = isoProject(pos.x, pos.y);
+      startX = projPos.x + ISO_DW;
+      startY = projPos.y + ISO_HALF_DH;
+    } else {
+      startX = pos.x + NODE_W;
+      startY = pos.y + NODE_H / 2;
+    }
     setDragConnection({ sourceId: nodeId, startX, startY, currentX: startX, currentY: startY });
     setConnectionTargetId(null);
-  }, [state.nodes, nodePositions]);
+  }, [state.nodes, nodePositions, state.viewMode]);
 
   const handleStageMoveForConnection = useCallback((e: any) => {
     if (!dragConnection) return;
@@ -635,13 +721,16 @@ export function KonvaCanvas() {
 
   // Handle service node drag end - persist to state
   const handleServiceDragEnd = useCallback((serviceId: string, newX: number, newY: number) => {
+    // In iso mode Konva reports the projected screen position — unproject back to layout coords
+    const isIso = state.viewMode === 'isometric';
+    const layoutPos = isIso ? isoUnproject(newX, newY) : { x: newX, y: newY };
     setNodePositions(prev => {
       const updated = new Map(prev);
-      updated.set(serviceId, { x: newX, y: newY });
+      updated.set(serviceId, layoutPos);
       return updated;
     });
-    updateNodesPositions([{ id: serviceId, position: { x: newX, y: newY } }]);
-  }, [updateNodesPositions]);
+    updateNodesPositions([{ id: serviceId, position: layoutPos }]);
+  }, [updateNodesPositions, state.viewMode]);
 
   // Handle drop from palette
   const handleDrop = useCallback((e: React.DragEvent) => {
@@ -1190,36 +1279,53 @@ export function KonvaCanvas() {
 
             // Use nodePositions (drag state) first, then node.position (layout result).
             // Never fall back to servicePositions — those use old TIER_X values and go off-screen.
-            const sourcePos = nodePositions.get(edge.source) ?? sourceNode.position;
-            const targetPos = nodePositions.get(edge.target) ?? targetNode.position;
+            const srcLayoutPos = nodePositions.get(edge.source) ?? sourceNode.position;
+            const tgtLayoutPos = nodePositions.get(edge.target) ?? targetNode.position;
 
             const isIsoMode = state.viewMode === 'isometric';
-            const srcW = sourceNode.type === 'group' ? (sourceNode.data.properties?.width as number ?? 400) : isIsoMode ? ISO_DW : NODE_W;
-            const srcH = sourceNode.type === 'group' ? (sourceNode.data.properties?.height as number ?? 250) : isIsoMode ? ISO_DH : NODE_H;
-            const tgtW = targetNode.type === 'group' ? (targetNode.data.properties?.width as number ?? 400) : isIsoMode ? ISO_DW : NODE_W;
-            const tgtH = targetNode.type === 'group' ? (targetNode.data.properties?.height as number ?? 250) : isIsoMode ? ISO_DH : NODE_H;
 
-            const srcCenterX = sourcePos.x + srcW / 2;
-            const tgtCenterX = targetPos.x + tgtW / 2;
-
-            // Exit from right edge of source, enter left edge of target (left-to-right).
-            // Reverse for right-to-left connections.
+            // In iso mode: project layout coords to screen coords, connect at cube centre.
+            // In 2D mode: use layout coords directly, connect at card edges.
             let srcX: number, srcY: number, tgtX: number, tgtY: number;
-            if (srcCenterX <= tgtCenterX) {
-              srcX = sourcePos.x + srcW;
-              srcY = sourcePos.y + srcH / 2;
-              tgtX = targetPos.x;
-              tgtY = targetPos.y + tgtH / 2;
+
+            if (isIsoMode) {
+              // Project both node positions; connect from/to the centre of each cube top face
+              const srcProj = isoProject(srcLayoutPos.x, srcLayoutPos.y);
+              const tgtProj = isoProject(tgtLayoutPos.x, tgtLayoutPos.y);
+              // Centre of iso cube top face
+              srcX = srcProj.x + ISO_HALF_DW;
+              srcY = srcProj.y + ISO_HALF_DH;
+              tgtX = tgtProj.x + ISO_HALF_DW;
+              tgtY = tgtProj.y + ISO_HALF_DH;
             } else {
-              srcX = sourcePos.x;
-              srcY = sourcePos.y + srcH / 2;
-              tgtX = targetPos.x + tgtW;
-              tgtY = targetPos.y + tgtH / 2;
+              const srcW = sourceNode.type === 'group' ? (sourceNode.data.properties?.width as number ?? 400) : NODE_W;
+              const srcH = sourceNode.type === 'group' ? (sourceNode.data.properties?.height as number ?? 250) : NODE_H;
+              const tgtW = targetNode.type === 'group' ? (targetNode.data.properties?.width as number ?? 400) : NODE_W;
+              const tgtH = targetNode.type === 'group' ? (targetNode.data.properties?.height as number ?? 250) : NODE_H;
+
+              const srcCenterX = srcLayoutPos.x + srcW / 2;
+              const tgtCenterX = tgtLayoutPos.x + tgtW / 2;
+
+              // Exit from right edge of source, enter left edge of target (left-to-right).
+              if (srcCenterX <= tgtCenterX) {
+                srcX = srcLayoutPos.x + srcW;
+                srcY = srcLayoutPos.y + srcH / 2;
+                tgtX = tgtLayoutPos.x;
+                tgtY = tgtLayoutPos.y + tgtH / 2;
+              } else {
+                srcX = srcLayoutPos.x;
+                srcY = srcLayoutPos.y + srcH / 2;
+                tgtX = tgtLayoutPos.x + tgtW;
+                tgtY = tgtLayoutPos.y + tgtH / 2;
+              }
             }
 
-            // Route through a safe corridor — never through service node interiors
+            // Route through a safe corridor — never through service node interiors (2D only)
+            // In iso mode use a direct line (corridor routing is Cartesian-only)
             const fanOffset = edgeFanMap.get(edge.id) ?? 0;
-            const pathPoints = routeEdgeSmart(edge.source, edge.target, srcX, srcY, tgtX, tgtY, fanOffset);
+            const pathPoints = isIsoMode
+              ? [srcX, srcY + fanOffset, tgtX, tgtY + fanOffset]
+              : routeEdgeSmart(edge.source, edge.target, srcX, srcY, tgtX, tgtY, fanOffset);
 
             // Style by connection type
             const connType = edge.data?.connectionType ?? 'public';
@@ -1285,8 +1391,8 @@ export function KonvaCanvas() {
             );
           })}
 
-          {/* Render groups (containers) */}
-          {groups.map((group) => {
+          {/* Render groups (containers) — shallowest first so inner groups appear on top */}
+          {sortedGroups.map((group) => {
             // Use pre-calculated position and dimensions from layout algorithm
             // The layout algorithm (tierLayoutSimple) already calculated optimal positions
             // and stored dimensions in node.data.properties
@@ -1296,130 +1402,7 @@ export function KonvaCanvas() {
             const height = group.data.properties?.height as number ?? 250;
 
             const isSelected = selectedId === group.id || selectedNodeIds.has(group.id);
-
-            // --- ISOMETRIC GROUP: true iso diamond (rhombus) ---
-            // All 4 edges follow iso grid lines exactly (slopes ±0.5), like the red overlay in the design.
-            // Shape: Top(W/2, 0), Right(W, dH/2), Bottom(W/2, dH), Left(0, dH/2)
-            // where dH = W/2  →  all edges have slope = ±dH/2 / (W/2) = ±0.5 ✓
-            if (state.viewMode === 'isometric') {
-              const isoGroupStyles = {
-                'resource-group': { fillColor: '#1e40af', fillOpacity: 0.06, stroke: '#60a5fa', labelColor: '#93c5fd' },
-                'virtual-network': { fillColor: '#065f46', fillOpacity: 0.08, stroke: '#34d399', labelColor: '#6ee7b7' },
-                'subnet':          { fillColor: '#4c1d95', fillOpacity: 0.10, stroke: '#a78bfa', labelColor: '#c4b5fd' },
-              };
-              const gs = isoGroupStyles[group.data.groupType as keyof typeof isoGroupStyles]
-                       ?? isoGroupStyles['resource-group'];
-
-              // Diamond: W × (W/2) bounding box. All edges slope ±0.5 — traces the iso grid exactly.
-              const dH = width * 0.5;  // diamond height = W/2
-              const diamondPoints = [
-                width / 2, 0,       // Top vertex
-                width,     dH / 2,  // Right vertex  (= W/4 from top)
-                width / 2, dH,      // Bottom vertex
-                0,         dH / 2,  // Left vertex
-              ];
-
-              // Label sits ON the top-right edge, rotated +26.57° (downhill, same as App-VNet/Subnet labels).
-              const labelText = group.data.displayName;
-              // Measure actual text width so the pill always fits the label exactly.
-              // 20px padding = 10px each side.
-              const labelW = measureTextWidth(labelText, 11, '600') + 20;
-              const ISO_EDGE_ANGLE = Math.atan(0.5) * (180 / Math.PI); // ≈ 26.57°
-              const labelAnchorX = width / 2;
-              const labelAnchorY = 0;
-
-              return (
-                <Group key={group.id} x={groupX} y={groupY} draggable={false}
-                  onContextMenu={(e) => handleNodeContextMenu(group.id, e)}>
-                  {/* Filled diamond background */}
-                  <Line
-                    points={diamondPoints}
-                    closed
-                    fill={gs.fillColor}
-                    opacity={gs.fillOpacity}
-                    stroke="transparent"
-                    strokeWidth={0}
-                    listening={false}
-                  />
-                  {/* Dashed diamond border — all 4 edges follow iso grid lines */}
-                  <Line
-                    points={diamondPoints}
-                    closed
-                    fill="transparent"
-                    stroke={isSelected ? '#fbbf24' : gs.stroke}
-                    strokeWidth={isSelected ? 2 : 1.5}
-                    dash={[12, 6]}
-                    shadowColor={isSelected ? '#fbbf24' : 'transparent'}
-                    shadowBlur={isSelected ? 12 : 0}
-                    shadowOpacity={isSelected ? 0.5 : 0}
-                    listening={false}
-                  />
-                  {/* Label parallelogram — sits ABOVE the top-right edge.
-                      Bottom edge (y=0) lies on the diamond edge line.
-                      Top edge (y=-pH) lies on the next outer grid line (~17.9px away).
-                      Left/right sides follow the -26.57° grid family (shear = pH * 0.75). */}
-                  <Group
-                    x={labelAnchorX}
-                    y={labelAnchorY}
-                    rotation={ISO_EDGE_ANGLE}
-                  >
-                    {(() => {
-                      const pH = 18;
-                      const shear = pH * 0.75; // 13.5px — side edges follow -26.57° grid family
-                      const r = 5;             // corner radius
-                      const W = labelW;
-                      // Parallelogram corners: bottom on edge (y=0), top above (y=-pH)
-                      const P0 = [4,           0  ];       // BL (on edge)
-                      const P1 = [4 + W,       0  ];       // BR (on edge)
-                      const P2 = [4 + W + shear, -pH];     // TR (above edge)
-                      const P3 = [4 + shear,   -pH];       // TL (above edge)
-                      // Edge unit vectors (same family as iso grid sides)
-                      const e01: [number,number] = [1, 0];         // bottom: →
-                      const e12: [number,number] = [0.6, -0.8];    // right side: ↗
-                      const e23: [number,number] = [-1, 0];        // top: ←
-                      const e30: [number,number] = [-0.6, 0.8];    // left side: ↙
-                      return (
-                        <>
-                          {/* Properly rounded parallelogram via canvas quadraticCurveTo */}
-                          <Shape
-                            sceneFunc={(ctx, shape) => {
-                              ctx.beginPath();
-                              // Start: r before BL along incoming left-side edge
-                              ctx.moveTo(P0[0] - r*e30[0], P0[1] - r*e30[1]);
-                              ctx.quadraticCurveTo(P0[0], P0[1], P0[0]+r*e01[0], P0[1]+r*e01[1]);
-                              ctx.lineTo(P1[0]-r*e01[0], P1[1]-r*e01[1]);
-                              ctx.quadraticCurveTo(P1[0], P1[1], P1[0]+r*e12[0], P1[1]+r*e12[1]);
-                              ctx.lineTo(P2[0]-r*e12[0], P2[1]-r*e12[1]);
-                              ctx.quadraticCurveTo(P2[0], P2[1], P2[0]+r*e23[0], P2[1]+r*e23[1]);
-                              ctx.lineTo(P3[0]-r*e23[0], P3[1]-r*e23[1]);
-                              ctx.quadraticCurveTo(P3[0], P3[1], P3[0]+r*e30[0], P3[1]+r*e30[1]);
-                              ctx.closePath();
-                              ctx.fillStrokeShape(shape);
-                            }}
-                            fill={gs.stroke}
-                            opacity={0.40}
-                            listening={false}
-                          />
-                          {/* Text skewed to match parallelogram lean: skewX = -shear/pH = -0.75
-                              x is computed so the visual gap is equal on both sides.
-                              Because skewX shifts the text left, we must offset rightward by
-                              pillLeftAtTextTopY (left edge of pill at text's y) + padding. */}
-                          <Text
-                            text={labelText}
-                            x={4 + shear * (pH - 4) / pH + 10}
-                            y={-pH + 4}
-                            skewX={-(shear / pH)}
-                            fontSize={11} fontStyle="600"
-                            fill={gs.labelColor}
-                            onClick={() => handleNodeClick(group.id)}
-                          />
-                        </>
-                      );
-                    })()}
-                  </Group>
-                </Group>
-              );
-            }
+            const isIsoMode = state.viewMode === 'isometric';
 
             // Professional Azure-style group rendering - subtle, almost invisible fills
             const styles = {
@@ -1455,6 +1438,71 @@ export function KonvaCanvas() {
               },
             };
             const style = styles[group.data.groupType as keyof typeof styles] || styles['resource-group'];
+
+            if (isIsoMode) {
+              // Project the 4 corners of the 2D rectangle through the iso transform.
+              // Clockwise projection: screen_y = (px - py) * 0.5 + OFFSET
+              //   tl = west corner (leftmost)
+              //   tr = south corner (lowest on screen)
+              //   br = east corner (rightmost)
+              //   bl = north corner (topmost on screen — SMALLEST y)
+              const tl = isoProject(groupX,         groupY);
+              const tr = isoProject(groupX + width,  groupY);
+              const br = isoProject(groupX + width,  groupY + height);
+              const bl = isoProject(groupX,          groupY + height);
+
+              // Header: north-east edge — the BOTTOM of the 2D rectangle maps to the TOP of
+              // the screen in clockwise iso. Strip the last HEADER_H px of layout Y.
+              // This puts the header along the bl→br edge (north corner → east corner).
+              const HEADER_H = 44; // px in layout Y space
+              const hBL = isoProject(groupX,         groupY + height - HEADER_H); // just south of bl
+              const hBR = isoProject(groupX + width,  groupY + height - HEADER_H); // just south of br
+
+              return (
+                <Group key={group.id} listening={false}>
+                  {/* Background fill parallelogram */}
+                  <Line
+                    points={[tl.x, tl.y, tr.x, tr.y, br.x, br.y, bl.x, bl.y]}
+                    closed
+                    fill={style.fill}
+                    opacity={style.fillOpacity}
+                    listening={false}
+                  />
+                  {/* Border */}
+                  <Line
+                    points={[tl.x, tl.y, tr.x, tr.y, br.x, br.y, bl.x, bl.y]}
+                    closed
+                    stroke={isSelected ? '#fbbf24' : style.stroke}
+                    strokeWidth={isSelected ? 2 : 1}
+                    shadowColor={isSelected ? '#fbbf24' : 'transparent'}
+                    shadowBlur={isSelected ? 15 : 0}
+                    shadowOpacity={isSelected ? 0.5 : 0}
+                    listening={false}
+                  />
+                  {/* Header: north-east edge strip (bl → br direction) */}
+                  <Line
+                    points={[bl.x, bl.y, br.x, br.y, hBR.x, hBR.y, hBL.x, hBL.y]}
+                    closed
+                    fill={style.headerFill}
+                    opacity={style.headerOpacity}
+                    listening={false}
+                  />
+                  {/* Label: iso text — rotation follows Family A, skewX makes verticals follow Family B */}
+                  {/* skewX=-0.75 derived from: slope(y-basis) = -0.5 → (0.4472k+0.8944)/(0.8944k-0.4472)=-0.5 → k=-0.75 */}
+                  <Text
+                    text={group.data.displayName}
+                    x={bl.x + 15}
+                    y={bl.y + 14}
+                    rotation={Math.atan2(0.5, 1) * (180 / Math.PI)}
+                    skewX={-0.75}
+                    fontSize={12}
+                    fontStyle="600"
+                    fill={style.labelColor}
+                    listening={false}
+                  />
+                </Group>
+              );
+            }
 
             return (
               <Group
@@ -1592,8 +1640,11 @@ export function KonvaCanvas() {
                 ISO_HALF_DW - ISO_HALF_DW * accentT, ISO_HALF_DH * accentT,
               ];
 
+              // Project the 2D layout position to iso screen coordinates
+              const projPos = isoProject(pos.x, pos.y);
+
               return (
-                <Group key={service.id} {...sharedGroupProps}>
+                <Group key={service.id} {...sharedGroupProps} x={projPos.x} y={projPos.y}>
                   {/* Left face (shadow side) — drawn first */}
                   <Line points={ISO_LEFT_FACE} closed
                     fill={ISO_LEFT_COLOR}
@@ -1974,6 +2025,63 @@ export function KonvaCanvas() {
           )}
         </Layer>
       </Stage>
+
+      {/* AI Generation loading overlay */}
+      {isGenerating && (
+        <div
+          className="absolute inset-0 flex items-center justify-center pointer-events-none"
+          style={{ zIndex: 50 }}
+        >
+          <div
+            className="flex flex-col items-center gap-4 px-8 py-6 rounded-2xl"
+            style={{
+              background: 'rgba(15, 23, 41, 0.92)',
+              border: '1px solid rgba(96, 165, 250, 0.4)',
+              boxShadow: '0 0 40px rgba(96, 165, 250, 0.15)',
+              backdropFilter: 'blur(12px)',
+            }}
+          >
+            {/* Spinning Azure-style loader */}
+            <div className="relative w-14 h-14">
+              <div
+                className="absolute inset-0 rounded-full border-2 border-blue-500/20 animate-spin"
+                style={{ borderTopColor: '#60a5fa', animationDuration: '1s' }}
+              />
+              <div
+                className="absolute inset-2 rounded-full border-2 border-blue-400/20 animate-spin"
+                style={{ borderTopColor: '#3b82f6', animationDuration: '0.7s', animationDirection: 'reverse' }}
+              />
+              <div className="absolute inset-0 flex items-center justify-center">
+                <div className="w-3 h-3 rounded-full bg-blue-400 animate-pulse" />
+              </div>
+            </div>
+
+            <div className="text-center">
+              <p className="text-blue-300 font-semibold text-sm mb-1">Generating Architecture</p>
+              <p className="text-slate-400 text-xs max-w-[240px] leading-relaxed">
+                {generatingMessage || 'AI is designing your Azure architecture…'}
+              </p>
+            </div>
+
+            {/* Animated step indicators */}
+            <div className="flex gap-2">
+              {['Services', 'Groups', 'Connections', 'Layout'].map((step, i) => (
+                <div key={step} className="flex flex-col items-center gap-1">
+                  <div
+                    className="w-2 h-2 rounded-full animate-pulse"
+                    style={{
+                      background: '#60a5fa',
+                      animationDelay: `${i * 0.25}s`,
+                      animationDuration: '1.2s',
+                    }}
+                  />
+                  <span className="text-slate-500 text-[9px]">{step}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Controls overlay */}
       <div className="absolute bottom-6 right-6 flex flex-col gap-2">
