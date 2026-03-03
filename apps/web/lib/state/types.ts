@@ -74,6 +74,11 @@ export interface AzureNodeData extends Record<string, unknown> {
   sku?: string;
   region?: string;
   monthlyCost?: number;
+  /**
+   * Per-node discount override (0-100). null or undefined = use global discount.
+   * When set, this takes precedence over the diagram-level globalPercent.
+   */
+  nodeDiscountPercent?: number | null;
   status: NodeStatus;
   properties: Record<string, unknown>;
   category: AzureServiceCategory;
@@ -168,6 +173,12 @@ export interface DiagramState {
   validationResults: ArchReviewFinding[];
   suggestedOptimizations: Optimization[];
 
+  // Discount configuration
+  discounts: {
+    /** Diagram-wide discount percentage (0-100). Applied to every service unless overridden. */
+    globalPercent: number;
+  };
+
   // Metadata
   diagramId?: string;
   diagramName: string;
@@ -192,6 +203,7 @@ export function createInitialState(): DiagramState {
     },
     validationResults: [],
     suggestedOptimizations: [],
+    discounts: { globalPercent: 0 },
     diagramName: 'Untitled Architecture',
     lastModified: new Date().toISOString(),
     version: 1,

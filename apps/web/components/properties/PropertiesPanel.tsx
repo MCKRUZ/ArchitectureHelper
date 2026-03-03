@@ -12,7 +12,7 @@ import { PricingLineItems } from './PricingLineItems';
 import { RefreshPricingButton } from './RefreshPricingButton';
 
 export function PropertiesPanel() {
-  const { selectedNode, selectedEdge, updateNode, removeNode, removeEdge, updateEdge } = useDiagramState();
+  const { selectedNode, selectedEdge, updateNode, removeNode, removeEdge, updateEdge, state } = useDiagramState();
 
   const handleNodeDataUpdate = (nodeId: string, currentData: AzureNodeData, updates: Partial<AzureNodeData>) => {
     const newData: AzureNodeData = { ...currentData, ...updates };
@@ -23,6 +23,7 @@ export function PropertiesPanel() {
     return (
       <NodePropertiesPanel
         node={selectedNode}
+        globalDiscountPercent={state?.discounts?.globalPercent ?? 0}
         onUpdate={(updates) => handleNodeDataUpdate(selectedNode.id, selectedNode.data, updates)}
         onDelete={() => removeNode(selectedNode.id)}
       />
@@ -62,11 +63,12 @@ function EmptyStatePanel() {
 
 interface NodePropertiesPanelProps {
   node: { id: string; data: AzureNodeData };
+  globalDiscountPercent: number;
   onUpdate: (updates: Partial<AzureNodeData>) => void;
   onDelete: () => void;
 }
 
-function NodePropertiesPanel({ node, onUpdate, onDelete }: NodePropertiesPanelProps) {
+function NodePropertiesPanel({ node, globalDiscountPercent, onUpdate, onDelete }: NodePropertiesPanelProps) {
   const { data } = node;
   const isGroup = data.groupType !== undefined;
 
@@ -85,6 +87,11 @@ function NodePropertiesPanel({ node, onUpdate, onDelete }: NodePropertiesPanelPr
   }, [data.serviceType, pricingConfig, region]);
 
   const hasDescriptor = PRICING_DESCRIPTORS[data.serviceType] !== undefined;
+
+  // Effective discount: per-node override takes precedence over global
+  const nodeDiscountPercent = data.nodeDiscountPercent;
+  const isUsingGlobal = nodeDiscountPercent == null;
+  const effectiveDiscount = isUsingGlobal ? globalDiscountPercent : nodeDiscountPercent;
 
   // Collapsible section state
   const [sections, setSections] = useState({
@@ -208,9 +215,52 @@ function NodePropertiesPanel({ node, onUpdate, onDelete }: NodePropertiesPanelPr
             title="Cost Breakdown"
             isOpen={sections.cost}
             onToggle={() => toggleSection('cost')}
-            badge={`$${Math.round(breakdown.totalMonthlyCost).toLocaleString()}/mo`}
+            badge={effectiveDiscount > 0
+              ? `$${Math.round(breakdown.totalMonthlyCost * (1 - effectiveDiscount / 100)).toLocaleString()}/mo`
+              : `$${Math.round(breakdown.totalMonthlyCost).toLocaleString()}/mo`
+            }
           >
-            <PricingLineItems breakdown={breakdown} />
+            {/* Discount row */}
+            <div className="rounded-md border bg-muted/30 p-2.5 space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-medium text-muted-foreground">Discount</label>
+                <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={isUsingGlobal}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        // Revert to global
+                        onUpdate({ nodeDiscountPercent: null });
+                      } else {
+                        // Start overriding with global value as initial
+                        onUpdate({ nodeDiscountPercent: globalDiscountPercent });
+                      }
+                    }}
+                    className="rounded"
+                  />
+                  Use global ({globalDiscountPercent}%)
+                </label>
+              </div>
+              {!isUsingGlobal && (
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    step={1}
+                    value={nodeDiscountPercent ?? 0}
+                    onChange={(e) => {
+                      const val = Math.max(0, Math.min(100, Number(e.target.value)));
+                      onUpdate({ nodeDiscountPercent: val });
+                    }}
+                    className="w-20 px-2 py-1 text-sm rounded-md border bg-background focus:outline-none focus:ring-2 focus:ring-primary"
+                  />
+                  <span className="text-sm text-muted-foreground">%</span>
+                </div>
+              )}
+            </div>
+            <PricingLineItems breakdown={breakdown} discountPercent={effectiveDiscount} />
           </CollapsibleSection>
         )}
 

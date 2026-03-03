@@ -4,6 +4,8 @@ import type { CostBreakdown } from '@/lib/pricing/types';
 
 interface PricingLineItemsProps {
   breakdown: CostBreakdown;
+  /** Effective discount percentage (0-100). When > 0, shows discount line and discounted total. */
+  discountPercent?: number;
 }
 
 function formatCost(cost: number): string {
@@ -12,12 +14,16 @@ function formatCost(cost: number): string {
   return `$${cost.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-export function PricingLineItems({ breakdown }: PricingLineItemsProps) {
+export function PricingLineItems({ breakdown, discountPercent = 0 }: PricingLineItemsProps) {
   if (breakdown.lineItems.length === 0) {
     return (
       <p className="text-xs text-muted-foreground italic">No cost data available.</p>
     );
   }
+
+  const hasDiscount = discountPercent > 0;
+  const discountAmount = breakdown.totalMonthlyCost * (discountPercent / 100);
+  const discountedTotal = breakdown.totalMonthlyCost - discountAmount;
 
   return (
     <div className="space-y-1">
@@ -30,19 +36,36 @@ export function PricingLineItems({ breakdown }: PricingLineItemsProps) {
         </div>
       ))}
 
-      {breakdown.lineItems.length > 1 && (
+      <div className="border-t my-1" />
+
+      {/* Base total (always shown when multiple line items) */}
+      {(breakdown.lineItems.length > 1 || hasDiscount) && (
+        <div className="flex items-center justify-between text-sm font-semibold">
+          <span>{hasDiscount ? 'Subtotal' : 'Total'}</span>
+          <span className="font-mono">
+            {formatCost(breakdown.totalMonthlyCost)}
+          </span>
+        </div>
+      )}
+
+      {/* Discount line */}
+      {hasDiscount && (
         <>
-          <div className="border-t my-1" />
+          <div className="flex items-center justify-between text-sm text-green-600 dark:text-green-400">
+            <span>Discount ({discountPercent}%)</span>
+            <span className="font-mono">-{formatCost(discountAmount)}</span>
+          </div>
           <div className="flex items-center justify-between text-sm font-semibold">
             <span>Total</span>
-            <span className="font-mono">
-              {formatCost(breakdown.totalMonthlyCost)}
+            <span className="font-mono text-green-700 dark:text-green-300">
+              {formatCost(discountedTotal)}
             </span>
           </div>
         </>
       )}
 
-      {breakdown.lineItems.length === 1 && (
+      {/* Single line item, no discount */}
+      {breakdown.lineItems.length === 1 && !hasDiscount && (
         <div className="flex items-center justify-between text-sm font-semibold pt-1">
           <span>Total</span>
           <span className="font-mono">

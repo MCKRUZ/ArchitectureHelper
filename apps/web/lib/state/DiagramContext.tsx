@@ -40,6 +40,7 @@ export interface DiagramContextValue {
   }) => void;
   setValidationResults: (results: ArchReviewFinding[]) => void;
   setCostSummary: (summary: CostSummary) => void;
+  setGlobalDiscount: (pct: number) => void;
 }
 
 export const DiagramContext = createContext<DiagramContextValue | null>(null);

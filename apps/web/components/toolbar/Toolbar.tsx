@@ -8,7 +8,7 @@ import { createInitialState } from '@/lib/state/types';
 import { CostBreakdownPanel } from './CostBreakdownPanel';
 
 export function Toolbar() {
-  const { state, setDiagramName, clearDiagram, setState } = useDiagramState();
+  const { state, setDiagramName, clearDiagram, setState, setGlobalDiscount } = useDiagramState();
   const [showCostBreakdown, setShowCostBreakdown] = useState(false);
 
   // Safety check for SSR/prerendering
@@ -98,9 +98,16 @@ export function Toolbar() {
 
         {/* Right section - Actions */}
         <div className="flex items-center gap-2">
+          {/* Global discount input */}
+          <GlobalDiscountInput
+            value={state.discounts?.globalPercent ?? 0}
+            onChange={setGlobalDiscount}
+          />
+
           {/* Cost summary — clickable to open breakdown */}
           <CostSummaryBadge
             totalCost={state.costSummary?.monthly ?? 0}
+            discountPercent={state.discounts?.globalPercent ?? 0}
             onClick={() => setShowCostBreakdown(true)}
           />
 
@@ -235,17 +242,64 @@ function ToolbarButton({
   );
 }
 
-// Cost summary badge — now clickable
-function CostSummaryBadge({ totalCost, onClick }: { totalCost: number; onClick: () => void }) {
-  const formatted = totalCost === 0 ? '$0' : `$${Math.round(totalCost).toLocaleString()}`;
+// Global discount input — compact inline field in the toolbar
+function GlobalDiscountInput({ value, onChange }: { value: number; onChange: (pct: number) => void }) {
+  const hasDiscount = value > 0;
+
+  return (
+    <div
+      className={cn(
+        'flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border transition-colors',
+        hasDiscount
+          ? 'bg-green-50 dark:bg-green-950 border-green-300 dark:border-green-700'
+          : 'bg-muted border-border'
+      )}
+      title="Global discount — applied to all services (e.g. EA, CSP, Reserved Instances)"
+    >
+      <span className={cn('text-xs', hasDiscount ? 'text-green-700 dark:text-green-300' : 'text-muted-foreground')}>
+        Discount
+      </span>
+      <input
+        type="number"
+        min={0}
+        max={100}
+        step={1}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className={cn(
+          'w-10 text-sm font-semibold text-center bg-transparent border-none focus:outline-none focus:ring-1 focus:ring-primary rounded',
+          hasDiscount ? 'text-green-800 dark:text-green-200' : 'text-foreground'
+        )}
+      />
+      <span className={cn('text-xs', hasDiscount ? 'text-green-700 dark:text-green-300' : 'text-muted-foreground')}>%</span>
+    </div>
+  );
+}
+
+// Cost summary badge — shows discounted total when a global discount is active
+function CostSummaryBadge({
+  totalCost,
+  discountPercent,
+  onClick,
+}: {
+  totalCost: number;
+  discountPercent: number;
+  onClick: () => void;
+}) {
+  const hasDiscount = discountPercent > 0;
+  const discountedCost = totalCost * (1 - discountPercent / 100);
+  const displayed = hasDiscount ? discountedCost : totalCost;
+  const formatted = displayed === 0 ? '$0' : `$${Math.round(displayed).toLocaleString()}`;
 
   return (
     <button
       onClick={onClick}
       className="flex items-center gap-1.5 px-3 py-1.5 bg-green-100 dark:bg-green-900 rounded-md hover:bg-green-200 dark:hover:bg-green-800 transition-colors cursor-pointer"
-      title="View cost breakdown"
+      title={hasDiscount ? `After ${discountPercent}% discount. Click for full breakdown.` : 'View cost breakdown'}
     >
-      <span className="text-xs text-green-700 dark:text-green-300">Est. Monthly</span>
+      <span className="text-xs text-green-700 dark:text-green-300">
+        {hasDiscount ? 'After Discount' : 'Est. Monthly'}
+      </span>
       <span className="text-sm font-semibold text-green-800 dark:text-green-200">{formatted}</span>
     </button>
   );

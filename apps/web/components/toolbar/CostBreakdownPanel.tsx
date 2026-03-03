@@ -15,18 +15,28 @@ interface ServiceCostRow {
   displayName: string;
   serviceType: AzureServiceType;
   sku: string;
-  monthlyCost: number;
+  baseCost: number;
+  discountPercent: number;
+  discountedCost: number;
   group: string;
 }
 
 export function CostBreakdownPanel({ isOpen, onClose }: CostBreakdownPanelProps) {
   const { state, selectNode } = useDiagramState();
 
-  const { rows, byGroup, byCategory, total } = useMemo(() => {
+  const globalDiscount = state.discounts?.globalPercent ?? 0;
+
+  const { rows, byGroup, byCategory, baseTotal, discountedTotal } = useMemo(() => {
     const serviceNodes = state.nodes.filter(n => n.type !== 'group');
     const rowList: ServiceCostRow[] = serviceNodes.map(n => {
-      const cost = n.data.monthlyCost ?? COST_ESTIMATES[n.data.serviceType as AzureServiceType] ?? 0;
-      const parentNode = n.parentId ? state.nodes.find(p => p.id === n.parentId) : null;
+      const baseCost = n.data.monthlyCost ?? COST_ESTIMATES[n.data.serviceType as AzureServiceType] ?? 0;
+      const nodeDiscount = n.data.nodeDiscountPercent;
+      const effectiveDiscount = nodeDiscount != null ? nodeDiscount : globalDiscount;
+      const discountedCost = baseCost * (1 - effectiveDiscount / 100);
+
+      // Resolve group name via logicalParent (Dual Model Pattern)
+      const logicalParentId = n.data.logicalParent;
+      const parentNode = logicalParentId ? state.nodes.find(p => p.id === logicalParentId) : null;
       const groupName = parentNode?.data.displayName ?? 'Unassigned';
 
       return {
@@ -34,32 +44,37 @@ export function CostBreakdownPanel({ isOpen, onClose }: CostBreakdownPanelProps)
         displayName: n.data.displayName,
         serviceType: n.data.serviceType as AzureServiceType,
         sku: n.data.sku || '',
-        monthlyCost: cost,
+        baseCost,
+        discountPercent: effectiveDiscount,
+        discountedCost,
         group: groupName,
       };
     });
 
-    // Sort by cost descending
-    rowList.sort((a, b) => b.monthlyCost - a.monthlyCost);
+    // Sort by discounted cost descending
+    rowList.sort((a, b) => b.discountedCost - a.discountedCost);
 
-    // Group aggregates
+    // Group aggregates (by discounted cost)
     const groupAgg: Record<string, number> = {};
     const catAgg: Record<string, number> = {};
-    let sum = 0;
+    let baseSum = 0;
+    let discountedSum = 0;
 
     rowList.forEach(r => {
-      sum += r.monthlyCost;
-      groupAgg[r.group] = (groupAgg[r.group] ?? 0) + r.monthlyCost;
-      catAgg[r.serviceType] = (catAgg[r.serviceType] ?? 0) + r.monthlyCost;
+      baseSum += r.baseCost;
+      discountedSum += r.discountedCost;
+      groupAgg[r.group] = (groupAgg[r.group] ?? 0) + r.discountedCost;
+      catAgg[r.serviceType] = (catAgg[r.serviceType] ?? 0) + r.discountedCost;
     });
 
     return {
       rows: rowList,
       byGroup: Object.entries(groupAgg).sort((a, b) => b[1] - a[1]),
       byCategory: Object.entries(catAgg).sort((a, b) => b[1] - a[1]),
-      total: sum,
+      baseTotal: baseSum,
+      discountedTotal: discountedSum,
     };
-  }, [state.nodes]);
+  }, [state.nodes, globalDiscount]);
 
   if (!isOpen) return null;
 
@@ -81,10 +96,17 @@ export function CostBreakdownPanel({ isOpen, onClose }: CostBreakdownPanelProps)
           </div>
           <div className="flex items-center gap-4">
             <div className="text-right">
+              {globalDiscount > 0 && (
+                <p className="text-sm line-through text-muted-foreground font-mono">
+                  ${Math.round(baseTotal).toLocaleString()}
+                </p>
+              )}
               <p className="text-2xl font-bold text-green-700 dark:text-green-300">
-                ${Math.round(total).toLocaleString()}
+                ${Math.round(discountedTotal).toLocaleString()}
               </p>
-              <p className="text-xs text-muted-foreground">est. monthly</p>
+              <p className="text-xs text-muted-foreground">
+                {globalDiscount > 0 ? `after ${globalDiscount}% discount` : 'est. monthly'}
+              </p>
             </div>
             <button
               onClick={onClose}
@@ -109,7 +131,7 @@ export function CostBreakdownPanel({ isOpen, onClose }: CostBreakdownPanelProps)
               {/* Summary by Resource Group */}
               <Section title="By Resource Group">
                 {byGroup.map(([name, cost]) => (
-                  <SummaryRow key={name} label={name} cost={cost} total={total} />
+                  <SummaryRow key={name} label={name} cost={cost} total={discountedTotal} />
                 ))}
               </Section>
 
@@ -120,7 +142,7 @@ export function CostBreakdownPanel({ isOpen, onClose }: CostBreakdownPanelProps)
                     key={svcType}
                     label={svcType.replace(/-/g, ' ')}
                     cost={cost}
-                    total={total}
+                    total={discountedTotal}
                   />
                 ))}
               </Section>
@@ -142,11 +164,17 @@ export function CostBreakdownPanel({ isOpen, onClose }: CostBreakdownPanelProps)
                           {row.serviceType.replace(/-/g, ' ')}
                           {row.sku ? ` \u00B7 ${row.sku}` : ''}
                           {row.group !== 'Unassigned' ? ` \u00B7 ${row.group}` : ''}
+                          {row.discountPercent > 0 ? ` \u00B7 -${row.discountPercent}%` : ''}
                         </p>
                       </div>
                       <div className="text-right flex-shrink-0">
+                        {row.discountPercent > 0 && (
+                          <p className="text-xs font-mono line-through text-muted-foreground">
+                            ${row.baseCost.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </p>
+                        )}
                         <p className="text-sm font-mono font-semibold">
-                          ${row.monthlyCost.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          ${row.discountedCost.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </p>
                         <p className="text-[10px] text-muted-foreground">/mo</p>
                       </div>
@@ -156,11 +184,19 @@ export function CostBreakdownPanel({ isOpen, onClose }: CostBreakdownPanelProps)
               </Section>
 
               {/* Footer total */}
-              <div className="sticky bottom-0 bg-card border-t px-6 py-3 flex items-center justify-between">
-                <span className="text-sm font-medium">Total Estimated Monthly Cost</span>
-                <span className="text-lg font-bold font-mono">
-                  ${Math.round(total).toLocaleString()}/mo
-                </span>
+              <div className="sticky bottom-0 bg-card border-t px-6 py-3">
+                {globalDiscount > 0 && (
+                  <div className="flex items-center justify-between text-sm text-muted-foreground mb-1">
+                    <span>Subtotal (before discount)</span>
+                    <span className="font-mono line-through">${Math.round(baseTotal).toLocaleString()}/mo</span>
+                  </div>
+                )}
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium">Total Estimated Monthly Cost</span>
+                  <span className="text-lg font-bold font-mono text-green-700 dark:text-green-300">
+                    ${Math.round(discountedTotal).toLocaleString()}/mo
+                  </span>
+                </div>
               </div>
             </>
           )}

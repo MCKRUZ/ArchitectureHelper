@@ -258,6 +258,20 @@ export function DiagramProvider({ children }: DiagramProviderProps) {
     [setState]
   );
 
+  const setGlobalDiscount = useCallback(
+    (pct: number) => {
+      const clamped = Math.max(0, Math.min(100, pct));
+      setState((prev) => {
+        const s = getState(prev);
+        return {
+          ...s,
+          discounts: { ...s.discounts, globalPercent: clamped },
+        };
+      });
+    },
+    [setState]
+  );
+
   const addGroup = useCallback(
     (group: {
       id: string;
@@ -619,7 +633,11 @@ export function DiagramProvider({ children }: DiagramProviderProps) {
       if (stored) {
         const data = JSON.parse(stored) as DiagramState;
         // Migrate old parentId-based data to Dual Model Pattern
-        const migrated = migrateToDualModel(data);
+        let migrated = migrateToDualModel(data);
+        // Backfill discounts for diagrams saved before this feature
+        if (!migrated.discounts) {
+          migrated = { ...migrated, discounts: { globalPercent: 0 } };
+        }
         setStateInternal(migrated);
         hasLoadedFromStorage.current = true;
         console.log('[DiagramProvider] Loaded diagram from localStorage and migrated to Dual Model Pattern');
@@ -667,6 +685,7 @@ export function DiagramProvider({ children }: DiagramProviderProps) {
       batchUpdate,
       setValidationResults,
       setCostSummary,
+      setGlobalDiscount,
     }),
     [
       state,
@@ -691,6 +710,7 @@ export function DiagramProvider({ children }: DiagramProviderProps) {
       batchUpdate,
       setValidationResults,
       setCostSummary,
+      setGlobalDiscount,
     ]
   );
 
