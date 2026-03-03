@@ -2,7 +2,7 @@
 
 AI-powered Azure architecture diagram tool — design, validate, and cost-estimate cloud infrastructure visually.
 
-![AzureCraft diagram overview](docs/screenshots/diagram-overview.png)
+![AzureCraft diagram overview](docs/screenshots/diagram-feature-demo.png)
 
 ---
 
