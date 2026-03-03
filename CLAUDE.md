@@ -76,3 +76,24 @@ When compacting, always preserve:
 - CopilotKit/AG-UI integration patterns established
 - Backend API endpoint contracts
 - Any Azure service icon or node type mappings
+
+<!-- nexus:start -->
+## Nexus Intelligence
+
+*Auto-updated by Nexus — do not edit this section manually.*
+*Last sync: 2026-03-03*
+
+### Recorded Decisions
+- **[architecture]** Use Konva canvas with Dual Model Pattern for Azure architecture visualization
+  > Dual Model Pattern requires absolute positions for nodes — batchUpdate must NOT convert to relative coords
+- **[library]** Use CopilotKit (useCopilotActions) for AI-assisted diagram interactions
+  > CopilotKit hooks wired into DiagramContext to enable natural language canvas operations
+- **[pattern]** Cost heatmap: node fill color scales dark-green → amber → red based on cost/maxNodeCost ratio; compliance overlay adds WAF border colors and CRIT/WARN badges
+  > ViewModeButton toggles between normal/heatmap/compliance views; active mode shows info banner below toolbar; edge fan-out staggers parallel edges 16px per index via routeEdgeSmart fanOffset
+- **[pattern]** Hierarchical Y-offsets for Azure resource layout: RG=0, VNet=60, Subnet=120, Service=180+
+  > Prevents VNet/RG header overlap when both start at Y=0; sibling-only collision detection (logicalParent check) avoids moving parent groups
+
+### Established Patterns
+- **C# records for immutable DTOs**: Use C# record types for all DTOs to get immutability and value equality. Updates create new instances via with expressions, never mutating.
+
+<!-- nexus:end -->

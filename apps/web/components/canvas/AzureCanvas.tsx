@@ -25,8 +25,10 @@ import { FlatGroupNode } from './nodes/FlatGroupNode';
 import { AzureEdge } from './edges/AzureEdge';
 import { IsometricGrid } from './IsometricGrid';
 import { CartesianGrid } from './CartesianGrid';
+import { GroupBackgrounds } from './GroupBackgrounds';
 import { useDiagramState } from '@/lib/state/useDiagramState';
 import { useCopilotActions } from './useCopilotActions';
+import { useLogicalTree } from '@/lib/state/useLogicalTree';
 import { snapToIsoGrid, snapGroupToIsoGrid } from '@/lib/layout/isoSnap';
 import { snapToCartesianGrid } from '@/lib/layout/cartesianSnap';
 import type { AzureNodeData, AzureEdgeData, AzureServiceType, AzureServiceCategory, GroupType } from '@/lib/state/types';
@@ -70,6 +72,9 @@ function AzureCanvasInner() {
     setCostSummary,
   } = useDiagramState();
 
+  // Build logical tree for GroupBackgrounds component
+  const logicalTree = useLogicalTree(state.nodes);
+
   const isIso = state.viewMode === 'isometric';
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const { screenToFlowPosition } = useReactFlow();
@@ -97,54 +102,20 @@ function AzureCanvasInner() {
   const nodeTypes = useMemo(() => (isIso ? isoNodeTypes : flatNodeTypes), [isIso]);
 
   // Sync state.nodes to React Flow nodes
+  // Dual Model Pattern: Groups are ONLY rendered as SVG overlays (GroupBackgrounds),
+  // NOT as React Flow nodes. This prevents duplicate rendering.
   useEffect(() => {
-    const parentGroups: AzureFlowNode[] = [];
-    const childGroups: AzureFlowNode[] = [];
-    const serviceChildren: AzureFlowNode[] = [];
+    const serviceNodes: AzureFlowNode[] = state.nodes
+      .filter((n) => n.type !== 'group') // Filter out groups - they're rendered by GroupBackgrounds
+      .map((n) => ({
+        id: n.id,
+        type: 'azureService' as const,
+        position: n.position,
+        data: n.data as AzureNodeData,
+        parentId: undefined, // Dual Model Pattern uses absolute positioning
+      }));
 
-    state.nodes.forEach((n) => {
-      if (n.type === 'group') {
-        const w = (n.data.properties?.width as number) ?? 400;
-        const h = (n.data.properties?.height as number) ?? 200;
-
-        const groupNode: AzureFlowNode = isIso
-          ? {
-              id: n.id,
-              type: 'group',
-              position: n.position,
-              data: n.data as AzureNodeData,
-              style: { width: w, height: h },
-              dragHandle: '.group-label',
-              parentId: n.parentId,
-            }
-          : {
-              id: n.id,
-              type: 'group' as const,
-              position: n.position,
-              data: n.data as AzureNodeData,
-              style: { width: w, height: h },
-              parentId: n.parentId,
-            };
-
-        // Parent groups (no parentId) come first, nested groups come after
-        if (n.parentId) {
-          childGroups.push(groupNode);
-        } else {
-          parentGroups.push(groupNode);
-        }
-      } else {
-        serviceChildren.push({
-          id: n.id,
-          type: 'azureService' as const,
-          position: n.position,
-          data: n.data as AzureNodeData,
-          parentId: n.parentId,
-        });
-      }
-    });
-
-    // React Flow requires parents before children in the array
-    setNodes([...parentGroups, ...childGroups, ...serviceChildren]);
+    setNodes(serviceNodes);
   }, [state.nodes, setNodes, isIso]);
 
   // Sync state.edges to React Flow edges
@@ -417,6 +388,7 @@ function AzureCanvasInner() {
       className="cloudcraft-canvas"
     >
       <GridComponent />
+      <GroupBackgrounds nodes={state.nodes} logicalTree={logicalTree} viewMode={state.viewMode} />
       <Controls className="cloudcraft-controls" />
       <MiniMap
         nodeStrokeWidth={2}

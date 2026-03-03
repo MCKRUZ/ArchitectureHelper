@@ -29,7 +29,8 @@ const NODE_W_ISO = 80;  // matches KonvaCanvas ISO_DW (small cube style)
 const NODE_H_ISO = 80;  // ISO_DH(40) + ISO_D(15) + label clearance(25)
 const GROUP_PADDING = 60;
 const GROUP_HEADER_HEIGHT = 60;
-const SUBNET_SPACING = 80; // gap between subnets
+const SUBNET_SPACING_2D  = 80;  // gap between subnets in 2D
+const SUBNET_SPACING_ISO = 700; // gap between subnets in iso (diamonds are much wider: dW = max(w, h*2))
 // Iso 2-column layout constants
 const ISO_COLS = 2;     // services per row in iso mode
 const ISO_COL_GAP = 20; // horizontal gap between iso columns
@@ -53,9 +54,11 @@ export async function calculateTierLayoutSimple(
   const positions = new Map<string, { x: number; y: number }>();
   const groupDimensions = new Map<string, { width: number; height: number }>();
 
-  const isIso = viewMode === 'isometric';
-  const nodeW = isIso ? NODE_W_ISO : NODE_W_2D;
-  const nodeH = isIso ? NODE_H_ISO : NODE_H_2D;
+  // Always use 2D layout geometry regardless of view mode.
+  // Iso mode uses the same positions/dimensions and renders iso cubes on top.
+  const isIso = false;
+  const nodeW = NODE_W_2D;
+  const nodeH = NODE_H_2D;
 
   // Separate groups and services
   const groups = nodes.filter(n => n.type === 'group');
@@ -185,7 +188,7 @@ export async function calculateTierLayoutSimple(
 
     console.log(`[tierLayout] Subnet "${subnet.data.displayName}" at (${subnetPos.x}, ${subnetPos.y}), size ${dims.width}x${dims.height}`);
 
-    currentSubnetX += dims.width + SUBNET_SPACING;
+    currentSubnetX += dims.width + (isIso ? SUBNET_SPACING_ISO : SUBNET_SPACING_2D);
   });
 
   // STEP 4: Position VNet to wrap subnets

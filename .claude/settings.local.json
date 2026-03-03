@@ -52,7 +52,19 @@
       "Bash(ls:*)",
       "Bash(git commit:*)",
       "Bash(Get-ChildItem \"C:\\\\Users\\\\kruz7\\\\.claude\\\\sessions\"\" -Filter \"*2026-02-1*.tmp \")",
-      "Bash(Start-Process \"http://localhost:3004\")"
+      "Bash(Start-Process \"http://localhost:3004\")",
+      "Bash(timeout /t 2)",
+      "Bash(Start-Sleep -Seconds 3)",
+      "Bash(Select-String -Pattern \"error|Error|compiled|Type|Failed\")",
+      "Bash(Remove-Item -Recurse -Force .next -ErrorAction SilentlyContinue)",
+      "Bash(Write-Host \"Cache cleared\")",
+      "Bash(Start-Sleep -Seconds 5)",
+      "Bash(Test-Path \"C:\\\\Users\\\\kruz7\\\\.claude\\\\hooks\\\\memory-persistence\\\\session-end.ps1\")",
+      "Bash(Test-Path \"C:\\\\Users\\\\kruz7\\\\.claude\\\\state\\\\langfuse_hook.log\")",
+      "Bash(PORT=3001 npm run dev:*)",
+      "Bash(PORT=3003 npm run dev:*)",
+      "Bash(Select-String -Pattern \"\\(error|warning|Failed|Success|Build|Compiled\\)\")",
+      "Bash(PORT=3004 npm run dev:*)"
     ],
     "deny": [
       "Read(./.env)",

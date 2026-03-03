@@ -22,7 +22,7 @@ test.describe('2D View - No Overlap Check', () => {
 
   test('load architecture in 2D view and verify no overlap', async ({ page }) => {
     // Set localStorage before page loads - force 2D mode
-    await page.goto('http://localhost:3004');
+    await page.goto('http://localhost:3007');
 
     // Inject architecture data in 2D mode
     await page.evaluate((data) => {
