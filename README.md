@@ -2,7 +2,21 @@
 
 AI-powered Azure architecture diagram tool — design, validate, and cost-estimate cloud infrastructure visually.
 
-![AzureCraft diagram overview](docs/screenshots/discount-feature-demo.png)
+## Demo
+
+![AzureCraft demo](docs/demo/demo.gif)
+
+> Describe your architecture in plain English, and AzureCraft builds the diagram — complete with cost estimates, WAF review, and multiple view modes.
+
+### Screenshots
+
+| AI Chat | Architecture | Node Properties |
+|---------|-------------|-----------------|
+| ![AI Response](docs/demo/screenshot-ai-response.png) | ![Architecture](docs/demo/screenshot-architecture.png) | ![Node Selected](docs/demo/screenshot-node-selected.png) |
+
+| Isometric View | Cost Heatmap |
+|---------------|-------------|
+| ![Isometric](docs/demo/screenshot-isometric.png) | ![Cost View](docs/demo/screenshot-cost-view.png) |
 
 ---
 
