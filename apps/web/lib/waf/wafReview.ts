@@ -2,6 +2,7 @@ import type { AzureNode, AzureEdge, ArchReviewFinding, CostSummary } from '@/lib
 import { COST_ESTIMATES } from './costEstimates';
 import { getAncestors } from '@/lib/state/useLogicalTree';
 import type { LogicalTree } from '@/lib/state/useLogicalTree';
+import { computeServiceSet, dataServiceSet } from '@/lib/azure/serviceClassification';
 
 interface WafReviewResult {
   findings: ArchReviewFinding[];
@@ -77,7 +78,7 @@ export function runWafReview(nodes: AzureNode[], edges: AzureEdge[]): WafReviewR
   }
 
   // Rule 5: Compute not connected to Key Vault
-  const computeTypes = new Set(['app-service', 'function-app', 'container-apps', 'aks', 'virtual-machine']);
+  const computeTypes = computeServiceSet;
   const keyVaultNodes = services.filter(n => n.data.serviceType === 'key-vault');
   if (keyVaultNodes.length > 0) {
     const kvIds = new Set(keyVaultNodes.map(n => n.id));
@@ -99,8 +100,8 @@ export function runWafReview(nodes: AzureNode[], edges: AzureEdge[]): WafReviewR
     });
   }
 
-  // Rule 6: Data services with public inbound
-  const dataTypes = new Set(['azure-sql', 'cosmos-db', 'storage-account', 'redis-cache', 'azure-openai', 'ai-search']);
+  // Rule 6: Data services with public inbound (data + AI services that should use private endpoints)
+  const dataTypes = new Set([...dataServiceSet, 'azure-openai' as const, 'ai-search' as const]);
   services.forEach(n => {
     if (!dataTypes.has(n.data.serviceType)) return;
     const hasPublicInbound = edges.some(

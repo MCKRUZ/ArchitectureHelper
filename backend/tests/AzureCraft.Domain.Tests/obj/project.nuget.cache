@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "dgSpecHash": "PKhdbSk9njo=",
+  "dgSpecHash": "sBUlQykpdJM=",
   "success": true,
   "projectFilePath": "C:\\Users\\kruz7\\OneDrive\\Documents\\Code Repos\\MCKRUZ\\ArchitectureHelper\\backend\\tests\\AzureCraft.Domain.Tests\\AzureCraft.Domain.Tests.csproj",
   "expectedPackageFiles": [
@@ -26,7 +26,10 @@
     "C:\\Users\\kruz7\\.nuget\\packages\\xunit.core\\2.9.2\\xunit.core.2.9.2.nupkg.sha512",
     "C:\\Users\\kruz7\\.nuget\\packages\\xunit.extensibility.core\\2.9.2\\xunit.extensibility.core.2.9.2.nupkg.sha512",
     "C:\\Users\\kruz7\\.nuget\\packages\\xunit.extensibility.execution\\2.9.2\\xunit.extensibility.execution.2.9.2.nupkg.sha512",
-    "C:\\Users\\kruz7\\.nuget\\packages\\xunit.runner.visualstudio\\3.0.0\\xunit.runner.visualstudio.3.0.0.nupkg.sha512"
+    "C:\\Users\\kruz7\\.nuget\\packages\\xunit.runner.visualstudio\\3.0.0\\xunit.runner.visualstudio.3.0.0.nupkg.sha512",
+    "C:\\Users\\kruz7\\.nuget\\packages\\microsoft.netcore.app.ref\\9.0.12\\microsoft.netcore.app.ref.9.0.12.nupkg.sha512",
+    "C:\\Users\\kruz7\\.nuget\\packages\\microsoft.windowsdesktop.app.ref\\9.0.12\\microsoft.windowsdesktop.app.ref.9.0.12.nupkg.sha512",
+    "C:\\Users\\kruz7\\.nuget\\packages\\microsoft.aspnetcore.app.ref\\9.0.12\\microsoft.aspnetcore.app.ref.9.0.12.nupkg.sha512"
   ],
   "logs": []
 }

@@ -24,5 +24,11 @@ public enum AzureServiceType
     EventHub,
     AzureOpenAi,
     EntraId,
-    LogAnalytics
+    LogAnalytics,
+    ApplicationInsights,
+    AiSearch,
+    DdosProtection,
+    EventGrid,
+    StaticWebApp,
+    ResourceGroup
 }

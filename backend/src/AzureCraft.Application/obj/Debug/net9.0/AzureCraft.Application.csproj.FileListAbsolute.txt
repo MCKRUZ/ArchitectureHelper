@@ -13,3 +13,4 @@ C:\Users\kruz7\OneDrive\Documents\Code Repos\MCKRUZ\ArchitectureHelper\backend\s
 C:\Users\kruz7\OneDrive\Documents\Code Repos\MCKRUZ\ArchitectureHelper\backend\src\AzureCraft.Application\obj\Debug\net9.0\refint\AzureCraft.Application.dll
 C:\Users\kruz7\OneDrive\Documents\Code Repos\MCKRUZ\ArchitectureHelper\backend\src\AzureCraft.Application\obj\Debug\net9.0\AzureCraft.Application.pdb
 C:\Users\kruz7\OneDrive\Documents\Code Repos\MCKRUZ\ArchitectureHelper\backend\src\AzureCraft.Application\obj\Debug\net9.0\ref\AzureCraft.Application.dll
+C:\Users\kruz7\OneDrive\Documents\Code Repos\MCKRUZ\ArchitectureHelper\backend\src\AzureCraft.Application\obj\Debug\net9.0\AzureCraft.Application.sourcelink.json

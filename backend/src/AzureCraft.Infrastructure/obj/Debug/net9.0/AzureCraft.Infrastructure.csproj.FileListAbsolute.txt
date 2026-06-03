@@ -15,3 +15,4 @@ C:\Users\kruz7\OneDrive\Documents\Code Repos\MCKRUZ\ArchitectureHelper\backend\s
 C:\Users\kruz7\OneDrive\Documents\Code Repos\MCKRUZ\ArchitectureHelper\backend\src\AzureCraft.Infrastructure\obj\Debug\net9.0\refint\AzureCraft.Infrastructure.dll
 C:\Users\kruz7\OneDrive\Documents\Code Repos\MCKRUZ\ArchitectureHelper\backend\src\AzureCraft.Infrastructure\obj\Debug\net9.0\AzureCraft.Infrastructure.pdb
 C:\Users\kruz7\OneDrive\Documents\Code Repos\MCKRUZ\ArchitectureHelper\backend\src\AzureCraft.Infrastructure\obj\Debug\net9.0\ref\AzureCraft.Infrastructure.dll
+C:\Users\kruz7\OneDrive\Documents\Code Repos\MCKRUZ\ArchitectureHelper\backend\src\AzureCraft.Infrastructure\obj\Debug\net9.0\AzureCraft.Infrastructure.sourcelink.json

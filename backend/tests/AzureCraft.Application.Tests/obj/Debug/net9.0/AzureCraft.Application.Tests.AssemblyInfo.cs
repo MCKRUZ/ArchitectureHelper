@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("AzureCraft.Application.Tests")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+bd58e40e6724e19cb1300e1f4a7f241dd202e555")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+5ac919726e54b3d3d434eddef9353c4f3a60de28")]
 [assembly: System.Reflection.AssemblyProductAttribute("AzureCraft.Application.Tests")]
 [assembly: System.Reflection.AssemblyTitleAttribute("AzureCraft.Application.Tests")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

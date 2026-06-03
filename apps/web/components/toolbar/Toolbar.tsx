@@ -6,10 +6,38 @@ import { useDiagramState } from '@/lib/state/useDiagramState';
 import type { DiagramState, ArchReviewFinding } from '@/lib/state/types';
 import { createInitialState } from '@/lib/state/types';
 import { CostBreakdownPanel } from './CostBreakdownPanel';
+import { runDeepWafReview } from '@/lib/waf/deepWafReview';
+import { BicepPreviewPanel } from '@/components/bicep/BicepPreviewPanel';
+import { fetchBicepPreview, downloadBicepZip } from '@/lib/api/bicep';
+import type { BicepFile } from '@/lib/api/bicep';
+import { AzureLoginButton } from '@/components/auth/AzureLoginButton';
+import { DeployDialog } from '@/components/deploy/DeployDialog';
+import { DeployStatusPanel } from '@/components/deploy/DeployStatusPanel';
+import { useAzureAuth } from '@/lib/auth/useAzureAuth';
+import {
+  deployDiagram,
+  subscribeToDeploymentStatus,
+  type DeploymentStatusSnapshot,
+} from '@/lib/api/deploy';
+import { serializeDiagramForExport } from '@/lib/api/bicep';
 
 export function Toolbar() {
-  const { state, setDiagramName, clearDiagram, setState, setGlobalDiscount } = useDiagramState();
+  const { state, setDiagramName, clearDiagram, setState, setGlobalDiscount, setValidationResults } = useDiagramState();
   const [showCostBreakdown, setShowCostBreakdown] = useState(false);
+  const [isDeepReviewing, setIsDeepReviewing] = useState(false);
+  const [showBicepPreview, setShowBicepPreview] = useState(false);
+  const [bicepFiles, setBicepFiles] = useState<BicepFile[]>([]);
+  const [isBicepLoading, setIsBicepLoading] = useState(false);
+
+  // Deploy state
+  const { isAuthenticated } = useAzureAuth();
+  const [showDeployDialog, setShowDeployDialog] = useState(false);
+  const [showDeployStatus, setShowDeployStatus] = useState(false);
+  const [isDeploying, setIsDeploying] = useState(false);
+  const [deploymentName, setDeploymentName] = useState<string | null>(null);
+  const [deployStatus, setDeployStatus] = useState<DeploymentStatusSnapshot | null>(null);
+  const [deployPortalUrl, setDeployPortalUrl] = useState<string | null>(null);
+  const [deployError, setDeployError] = useState<string | null>(null);
 
   // Safety check for SSR/prerendering
   if (!state) return null;
@@ -53,6 +81,82 @@ export function Toolbar() {
     };
     input.click();
   }, [setState]);
+
+  // Handle deep WAF review
+  const handleDeepReview = useCallback(async () => {
+    if (!state || state.nodes.length === 0 || isDeepReviewing) return;
+    setIsDeepReviewing(true);
+    try {
+      const shallowResults = state.validationResults ?? [];
+      const deepFindings = await runDeepWafReview(state.nodes, state.edges, shallowResults);
+      // Append deep findings to existing shallow results
+      setValidationResults([...shallowResults, ...deepFindings]);
+    } finally {
+      setIsDeepReviewing(false);
+    }
+  }, [state, isDeepReviewing, setValidationResults]);
+
+  // Handle Bicep export preview
+  const handleBicepPreview = useCallback(async () => {
+    if (!state || state.nodes.length === 0 || isBicepLoading) return;
+    setIsBicepLoading(true);
+    setShowBicepPreview(true);
+    try {
+      const result = await fetchBicepPreview(state);
+      setBicepFiles(result.files);
+    } catch (err) {
+      console.error('Bicep preview failed:', err);
+      setBicepFiles([]);
+    } finally {
+      setIsBicepLoading(false);
+    }
+  }, [state, isBicepLoading]);
+
+  // Handle Bicep zip download
+  const handleBicepDownload = useCallback(async () => {
+    if (!state || state.nodes.length === 0) return;
+    setIsBicepLoading(true);
+    try {
+      await downloadBicepZip(state);
+    } catch (err) {
+      console.error('Bicep download failed:', err);
+    } finally {
+      setIsBicepLoading(false);
+    }
+  }, [state]);
+
+  // Handle deploy
+  const handleDeploy = useCallback(
+    async (subscriptionId: string, resourceGroupName: string, region: string) => {
+      if (!state) return;
+      setIsDeploying(true);
+      setDeployError(null);
+      try {
+        const diagram = serializeDiagramForExport(state);
+        const result = await deployDiagram(subscriptionId, resourceGroupName, region, diagram);
+
+        setDeploymentName(result.deploymentName);
+        setDeployPortalUrl(result.portalUrl);
+        setShowDeployDialog(false);
+        setShowDeployStatus(true);
+
+        // Start SSE status stream
+        subscribeToDeploymentStatus(
+          result.deploymentName,
+          subscriptionId,
+          resourceGroupName,
+          (status) => setDeployStatus(status),
+          (error) => setDeployError(error),
+        );
+      } catch (err) {
+        setDeployError(err instanceof Error ? err.message : 'Deployment failed');
+        setShowDeployStatus(true);
+      } finally {
+        setIsDeploying(false);
+      }
+    },
+    [state],
+  );
 
   return (
     <>
@@ -114,11 +218,47 @@ export function Toolbar() {
           {/* WAF badge — always visible */}
           <ValidationBadge results={state.validationResults ?? []} />
 
+          {/* Deep Review button — only visible when there are nodes */}
+          {state.nodes.length > 0 && (
+            <button
+              onClick={handleDeepReview}
+              disabled={isDeepReviewing}
+              title="Run a deeper analysis covering observability, compliance, cost optimization, and resilience patterns"
+              className={cn(
+                'px-3 py-1.5 text-xs font-medium rounded-md transition-colors border',
+                isDeepReviewing
+                  ? 'bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300 border-blue-300 dark:border-blue-700 cursor-wait'
+                  : 'bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800 hover:bg-blue-100 dark:hover:bg-blue-900'
+              )}
+            >
+              {isDeepReviewing ? 'Reviewing...' : 'Deep Review'}
+            </button>
+          )}
+
           {/* Action buttons */}
+          {state.nodes.length > 0 && (
+            <>
+              <ToolbarButton
+                onClick={handleBicepPreview}
+                title="Generate production-ready Bicep files from your diagram"
+              >
+                {isBicepLoading ? 'Generating...' : 'Export Bicep'}
+              </ToolbarButton>
+              {isAuthenticated && (
+                <button
+                  onClick={() => setShowDeployDialog(true)}
+                  title="Deploy this architecture to your Azure subscription"
+                  className="px-3 py-1.5 text-sm font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700 transition-colors"
+                >
+                  Deploy
+                </button>
+              )}
+            </>
+          )}
           <ToolbarButton onClick={handleImport} title="Import diagram">
             Import
           </ToolbarButton>
-          <ToolbarButton onClick={handleExport} title="Export diagram">
+          <ToolbarButton onClick={handleExport} title="Export diagram as JSON">
             Export
           </ToolbarButton>
           <ToolbarButton
@@ -128,6 +268,11 @@ export function Toolbar() {
           >
             Clear
           </ToolbarButton>
+
+          {/* Azure auth */}
+          <div className="ml-2 pl-2 border-l">
+            <AzureLoginButton />
+          </div>
         </div>
       </div>
 
@@ -174,6 +319,34 @@ export function Toolbar() {
       <CostBreakdownPanel
         isOpen={showCostBreakdown}
         onClose={() => setShowCostBreakdown(false)}
+      />
+
+      {/* Bicep preview slide-over */}
+      <BicepPreviewPanel
+        isOpen={showBicepPreview}
+        onClose={() => setShowBicepPreview(false)}
+        files={bicepFiles}
+        onDownloadZip={handleBicepDownload}
+        isLoading={isBicepLoading}
+      />
+
+      {/* Deploy dialog */}
+      <DeployDialog
+        isOpen={showDeployDialog}
+        onClose={() => setShowDeployDialog(false)}
+        state={state}
+        onDeploy={handleDeploy}
+        isDeploying={isDeploying}
+      />
+
+      {/* Deploy status panel */}
+      <DeployStatusPanel
+        isOpen={showDeployStatus}
+        onClose={() => setShowDeployStatus(false)}
+        deploymentName={deploymentName}
+        status={deployStatus}
+        portalUrl={deployPortalUrl}
+        error={deployError}
       />
     </>
   );

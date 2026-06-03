@@ -6,6 +6,7 @@
  */
 
 import type { AzureNode, AzureServiceType, GroupType } from '@/lib/state/types';
+import { getTargetSubnet as getTargetSubnetFromClassification } from '@/lib/azure/serviceClassification';
 
 interface ValidationResult {
   isValid: boolean;
@@ -20,66 +21,6 @@ interface ArchitectureFix {
   newParent?: string;
   newPosition?: { x: number; y: number };
 }
-
-/**
- * Azure Service Classification Rules
- */
-const SERVICE_RULES = {
-  // Services that should NEVER be in a VNet (global/regional services)
-  globalServices: [
-    'front-door',
-    'entra-id',
-    'ddos-protection',
-    'log-analytics',
-    'application-insights',
-  ] as AzureServiceType[],
-
-  // Compute services (should be in App Subnet)
-  computeServices: [
-    'app-service',
-    'function-app',
-    'container-apps',
-    'aks',
-    'virtual-machine',
-  ] as AzureServiceType[],
-
-  // Data services (should be in Data Subnet)
-  dataServices: [
-    'cosmos-db',
-    'azure-sql',
-    'redis-cache',
-    'storage-account',
-  ] as AzureServiceType[],
-
-  // Networking/Gateway services (should be in App Subnet or dedicated Gateway Subnet)
-  networkingServices: [
-    'api-management',
-    'application-gateway',
-  ] as AzureServiceType[],
-
-  // Security services (can be in App Subnet or dedicated Security Subnet)
-  securityServices: [
-    'key-vault',
-  ] as AzureServiceType[],
-
-  // AI/ML services (should be in AI Subnet or App Subnet)
-  aiServices: [
-    'azure-openai',
-    'ai-search',
-  ] as AzureServiceType[],
-
-  // Integration/Messaging services (should be in App Subnet for connectivity)
-  integrationServices: [
-    'event-grid',
-    'service-bus',
-    'event-hub',
-  ] as AzureServiceType[],
-
-  // Web services (should be in App Subnet)
-  webServices: [
-    'static-web-app',
-  ] as AzureServiceType[],
-};
 
 /**
  * Required group hierarchy for Azure architectures
@@ -115,33 +56,13 @@ const REQUIRED_GROUPS = {
 };
 
 /**
- * Determine which subnet a service should belong to
+ * Determine which subnet a service should belong to.
+ * Delegates to shared serviceClassification module.
  */
 function getTargetSubnet(serviceType: AzureServiceType): string | null {
-  console.log(`[getTargetSubnet] Checking service type: ${serviceType}`);
-
-  if (SERVICE_RULES.globalServices.includes(serviceType)) {
-    console.log(`  → Global service, returns null`);
-    return null; // Should not be in any subnet
-  }
-
-  if (SERVICE_RULES.dataServices.includes(serviceType)) {
-    console.log(`  → Data service, returns 'data-subnet'`);
-    return 'data-subnet';
-  }
-
-  if (SERVICE_RULES.computeServices.includes(serviceType) ||
-      SERVICE_RULES.networkingServices.includes(serviceType) ||
-      SERVICE_RULES.webServices.includes(serviceType) ||
-      SERVICE_RULES.aiServices.includes(serviceType) ||
-      SERVICE_RULES.integrationServices.includes(serviceType) ||
-      SERVICE_RULES.securityServices.includes(serviceType)) {
-    console.log(`  → Compute/Network/Web/AI/Integration/Security service, returns 'app-subnet'`);
-    return 'app-subnet';
-  }
-
-  console.log(`  → Unknown service type, returns 'app-subnet' (fallback)`);
-  return 'app-subnet'; // Default fallback
+  const result = getTargetSubnetFromClassification(serviceType);
+  console.log(`[getTargetSubnet] ${serviceType} → ${result ?? 'null (global)'}`);
+  return result;
 }
 
 /**

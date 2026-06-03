@@ -123,3 +123,4 @@ C:\Users\kruz7\OneDrive\Documents\Code Repos\MCKRUZ\ArchitectureHelper\backend\t
 C:\Users\kruz7\OneDrive\Documents\Code Repos\MCKRUZ\ArchitectureHelper\backend\tests\AzureCraft.Application.Tests\obj\Debug\net9.0\AzureCraft.Application.Tests.pdb
 C:\Users\kruz7\OneDrive\Documents\Code Repos\MCKRUZ\ArchitectureHelper\backend\tests\AzureCraft.Application.Tests\obj\Debug\net9.0\AzureCraft.Application.Tests.genruntimeconfig.cache
 C:\Users\kruz7\OneDrive\Documents\Code Repos\MCKRUZ\ArchitectureHelper\backend\tests\AzureCraft.Application.Tests\obj\Debug\net9.0\ref\AzureCraft.Application.Tests.dll
+C:\Users\kruz7\OneDrive\Documents\Code Repos\MCKRUZ\ArchitectureHelper\backend\tests\AzureCraft.Application.Tests\obj\Debug\net9.0\AzureCraft.Application.Tests.sourcelink.json
